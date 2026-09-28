@@ -1,0 +1,45 @@
+name: CI
+
+on:
+  push:
+    branches:
+      - main
+      - "phase/**"
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  unit:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+      - name: Install
+        run: python -m pip install -e ".[dev]"
+      - name: Ruff
+        run: ruff check src tests
+      - name: Unit tests
+        run: pytest -q
+      - name: CLI health
+        run: ashare-system health
+
+  public-data-smoke:
+    needs: unit
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+      - name: Install
+        run: python -m pip install -e .
+      - name: Multi-endpoint A-share network smoke test
+        run: ashare-system smoke-data --symbol 000001 --start 20240102 --end 20240110 --adjust ""
