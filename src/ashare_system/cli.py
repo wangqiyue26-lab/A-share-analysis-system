@@ -13,8 +13,14 @@ from .data.akshare_provider import AkshareEastmoneyProvider
 from .data.akshare_sina_provider import AkshareSinaProvider
 from .data.cache import ParquetBarCache
 from .data.router import DataRouter
+from .factors import FactorEngine, load_factor_config
+from .reporting import write_selection_outputs
 
 CHINA_TZ = ZoneInfo("Asia/Shanghai")
+
+
+def _data_router() -> DataRouter:
+    return DataRouter([AkshareEastmoneyProvider(), AkshareSinaProvider()])
 
 
 def command_health(args: argparse.Namespace) -> int:
@@ -37,7 +43,7 @@ def command_smoke_data(args: argparse.Namespace) -> int:
     today = datetime.now(CHINA_TZ).date()
     end = args.end or today.strftime("%Y%m%d")
     start = args.start or (today - timedelta(days=30)).strftime("%Y%m%d")
-    router = DataRouter([AkshareEastmoneyProvider(), AkshareSinaProvider()])
+    router = _data_router()
     bars = router.get_daily_bars(args.symbol, start, end, args.adjust)
     print(
         json.dumps(
@@ -59,6 +65,53 @@ def command_smoke_data(args: argparse.Namespace) -> int:
     return 0
 
 
+def command_select_sample(args: argparse.Namespace) -> int:
+    today = datetime.now(CHINA_TZ).date()
+    end = args.end or today.strftime("%Y%m%d")
+    start = args.start or (today - timedelta(days=240)).strftime("%Y%m%d")
+    symbols = [item.strip().zfill(6) for item in args.symbols.split(",") if item.strip()]
+    if not symbols:
+        raise ValueError("--symbols must contain at least one A-share code")
+
+    bars_by_symbol = {}
+    failures: list[dict[str, str]] = []
+    providers: dict[str, str | None] = {}
+    for symbol in symbols:
+        router = _data_router()
+        try:
+            bars_by_symbol[symbol] = router.get_daily_bars(symbol, start, end, args.adjust)
+            providers[symbol] = router.last_provider_name
+        except (RuntimeError, ValueError, ConnectionError) as exc:
+            failures.append({"symbol": symbol, "error": f"{type(exc).__name__}: {exc}"})
+
+    if not bars_by_symbol:
+        raise RuntimeError("No market data could be fetched for the requested sample")
+
+    config = load_factor_config(args.factor_config)
+    engine = FactorEngine(
+        config,
+        min_history=args.min_history,
+        min_average_amount_20=args.min_average_amount,
+    )
+    result = engine.run(bars_by_symbol)
+    paths = write_selection_outputs(
+        result,
+        args.output_dir,
+        top_n=args.top,
+        fetch_failures=failures,
+    )
+    payload = {
+        "symbols_requested": symbols,
+        "symbols_fetched": sorted(bars_by_symbol),
+        "providers": providers,
+        "ranked_count": int(result.ranking["rank"].notna().sum()),
+        "selected_csv": str(paths["selected_csv"]),
+        "summary_json": str(paths["summary_json"]),
+    }
+    print(json.dumps(payload, ensure_ascii=False, indent=2))
+    return 0
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="ashare-system")
     subparsers = parser.add_subparsers(dest="command", required=True)
@@ -74,6 +127,21 @@ def build_parser() -> argparse.ArgumentParser:
     smoke.add_argument("--adjust", default="qfq", choices=["", "qfq", "hfq"])
     smoke.add_argument("--cache-dir")
     smoke.set_defaults(func=command_smoke_data)
+
+    select = subparsers.add_parser(
+        "select-sample",
+        help="Fetch a small real A-share universe and generate an explainable ranking",
+    )
+    select.add_argument("--symbols", default="000001,600000,000333,600519,601318")
+    select.add_argument("--start")
+    select.add_argument("--end")
+    select.add_argument("--adjust", default="", choices=["", "qfq", "hfq"])
+    select.add_argument("--factor-config", default="config/factors.yml")
+    select.add_argument("--min-history", type=int, default=80)
+    select.add_argument("--min-average-amount", type=float, default=20_000_000.0)
+    select.add_argument("--top", type=int, default=20)
+    select.add_argument("--output-dir", default="reports/output/latest")
+    select.set_defaults(func=command_select_sample)
     return parser
 
 

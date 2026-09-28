@@ -1,0 +1,13 @@
+version: 1
+
+point_in_time:
+  require_announcement_date: true
+  respect_source_update_date: true
+
+providers:
+  - akshare_sina_financial_report
+
+statements:
+  - 资产负债表
+  - 利润表
+  - 现金流量表

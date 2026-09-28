@@ -1,0 +1,47 @@
+name: Phase 2 selection smoke
+
+on:
+  push:
+    branches:
+      - "phase/2b-pit-and-selection"
+  pull_request:
+    paths:
+      - "src/ashare_system/factors/**"
+      - "src/ashare_system/reporting.py"
+      - "src/ashare_system/cli.py"
+      - "config/factors.yml"
+      - ".github/workflows/selection-smoke.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  real-sample-selection:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+      - name: Install
+        run: python -m pip install -e .
+      - name: Rank a real liquid A-share sample
+        run: >-
+          ashare-system select-sample
+          --symbols 000001,600000,000333,600519,601318
+          --start 20230103
+          --end 20231229
+          --adjust ""
+          --top 5
+          --output-dir reports/output/selection-smoke
+      - name: Verify output
+        run: python -c "import pandas as pd; x=pd.read_csv('reports/output/selection-smoke/selected.csv'); assert len(x) >= 2; print(x[['symbol','rank','composite_score']].to_string(index=False))"
+      - name: Upload selection artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: phase2-selection-${{ github.run_id }}
+          path: reports/output/selection-smoke/
+          retention-days: 14
