@@ -13,6 +13,7 @@ from .data.akshare_provider import AkshareEastmoneyProvider
 from .data.akshare_sina_provider import AkshareSinaProvider
 from .data.cache import ParquetBarCache
 from .data.router import DataRouter
+from .data.security_master import AkshareSecurityMasterProvider, SecurityMasterSnapshotStore
 
 CHINA_TZ = ZoneInfo("Asia/Shanghai")
 
@@ -59,6 +60,35 @@ def command_smoke_data(args: argparse.Namespace) -> int:
     return 0
 
 
+def command_security_master_smoke(args: argparse.Namespace) -> int:
+    provider = AkshareSecurityMasterProvider()
+    result = provider.fetch_current()
+    master = result.master
+    counts = master.groupby("exchange")["symbol"].count().to_dict()
+    payload = {
+        "provider": provider.name,
+        "complete": result.complete,
+        "rows": len(master),
+        "exchange_counts": {str(key): int(value) for key, value in counts.items()},
+        "fetched_exchanges": result.fetched_exchanges,
+        "failures": result.failures,
+        "st_count": int(master["is_st"].sum()),
+        "observed_at": master["observed_at"].max().isoformat(),
+    }
+    print(json.dumps(payload, ensure_ascii=False, indent=2))
+
+    if args.cache_dir:
+        if result.complete:
+            path = SecurityMasterSnapshotStore(args.cache_dir).save(master)
+            print(f"cache={path}")
+        else:
+            print("cache_skipped=incomplete_security_master")
+
+    if args.require_complete and not result.complete:
+        return 2
+    return 0
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="ashare-system")
     subparsers = parser.add_subparsers(dest="command", required=True)
@@ -74,6 +104,14 @@ def build_parser() -> argparse.ArgumentParser:
     smoke.add_argument("--adjust", default="qfq", choices=["", "qfq", "hfq"])
     smoke.add_argument("--cache-dir")
     smoke.set_defaults(func=command_smoke_data)
+
+    master = subparsers.add_parser(
+        "security-master-smoke",
+        help="Fetch current SSE/SZSE/BSE lists and report exchange-level completeness",
+    )
+    master.add_argument("--cache-dir")
+    master.add_argument("--require-complete", action="store_true")
+    master.set_defaults(func=command_security_master_smoke)
     return parser
 
 
