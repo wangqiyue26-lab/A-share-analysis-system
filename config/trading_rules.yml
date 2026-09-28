@@ -1,0 +1,15 @@
+market: CN_A
+settlement:
+  stock_sell_rule: T+1
+execution:
+  board_lot: 100
+  reject_buy_at_limit_up: true
+  reject_sell_at_limit_down: true
+costs:
+  commission_rate: 0.0003
+  minimum_commission_cny: 5.0
+  sell_stamp_duty_rate: 0.0005
+  slippage_bps: 5
+notes:
+  - Values are configurable research defaults, not broker-specific truth.
+  - Board-specific price limits and historical rule changes are implemented in Phase 3.
