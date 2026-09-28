@@ -4,12 +4,15 @@ import argparse
 import json
 import platform
 import sys
-from datetime import date, timedelta
+from datetime import datetime, timedelta
 from pathlib import Path
+from zoneinfo import ZoneInfo
 
 from . import __version__
 from .data.akshare_provider import AkshareProvider
 from .data.cache import ParquetBarCache
+
+CHINA_TZ = ZoneInfo("Asia/Shanghai")
 
 
 def command_health(args: argparse.Namespace) -> int:
@@ -29,8 +32,9 @@ def command_health(args: argparse.Namespace) -> int:
 
 
 def command_smoke_data(args: argparse.Namespace) -> int:
-    end = args.end or date.today().strftime("%Y%m%d")
-    start = args.start or (date.today() - timedelta(days=30)).strftime("%Y%m%d")
+    today = datetime.now(CHINA_TZ).date()
+    end = args.end or today.strftime("%Y%m%d")
+    start = args.start or (today - timedelta(days=30)).strftime("%Y%m%d")
     provider = AkshareProvider()
     bars = provider.get_daily_bars(args.symbol, start, end, args.adjust)
     print(

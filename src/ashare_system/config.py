@@ -14,5 +14,5 @@ def load_yaml(path: str | Path) -> dict[str, Any]:
     if payload is None:
         return {}
     if not isinstance(payload, dict):
-        raise ValueError(f"Configuration root must be a mapping: {config_path}")
+        raise TypeError(f"Configuration root must be a mapping: {config_path}")
     return payload

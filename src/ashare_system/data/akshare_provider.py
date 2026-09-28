@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from typing import ClassVar
+
 import pandas as pd
 from tenacity import retry, stop_after_attempt, wait_exponential
 
@@ -10,7 +12,7 @@ from .schema import validate_bars
 class AkshareProvider(MarketDataProvider):
     name = "akshare"
 
-    _COLUMN_MAP = {
+    _COLUMN_MAP: ClassVar[dict[str, str]] = {
         "日期": "trade_date",
         "开盘": "open",
         "最高": "high",

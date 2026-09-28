@@ -26,6 +26,6 @@ class DataRouter:
         for provider in self.providers:
             try:
                 return provider.get_daily_bars(symbol, start, end, adjust)
-            except Exception as exc:  # provider boundary: collect and continue
+            except Exception as exc:  # noqa: BLE001 - provider boundary must fail over safely
                 failures.append(f"{provider.name}: {type(exc).__name__}: {exc}")
         raise RuntimeError("All market-data providers failed: " + " | ".join(failures))
