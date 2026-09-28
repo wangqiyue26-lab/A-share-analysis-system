@@ -27,3 +27,9 @@ Restatements are supported naturally: the same period/metric can have a later `a
 ## Provider policy
 
 The core model refuses to invent `available_at`. A source that supplies report period but no defensible announcement/availability timestamp is not automatically eligible for historical fundamental backtests. It may still be useful for current research, but that is a separate mode and must be labeled accordingly.
+
+### Live Sina statement adapter
+
+`AkshareSinaFinancialProvider` maps AKShare's Sina financial statements into the same PIT schema. Metric names are namespaced as `statement::item` so identical labels from different statements cannot collide.
+
+When Sina exposes both an announcement date and a later update date, the adapter conservatively uses the **later** timestamp as `available_at`. This prevents the currently visible revised value from leaking backward into dates before that revision existed. Public endpoints still may not expose superseded historical versions, so daily snapshot retention remains necessary for fully reconstructable research.
