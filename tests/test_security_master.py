@@ -2,8 +2,8 @@ import pandas as pd
 import pytest
 
 from ashare_system.data.security_master import (
-    AkshareSecurityMasterProvider,
     REQUIRED_EXCHANGES,
+    AkshareSecurityMasterProvider,
     SecurityMasterSnapshotStore,
     normalize_bj_security_master,
     normalize_sh_security_master,
