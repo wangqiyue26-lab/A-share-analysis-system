@@ -14,6 +14,7 @@ from .data.akshare_sina_provider import AkshareSinaProvider
 from .data.cache import ParquetBarCache
 from .data.router import DataRouter
 from .factors import FactorEngine, load_factor_config
+from .fundamentals import AkshareSinaFinancialProvider
 from .reporting import write_selection_outputs
 
 CHINA_TZ = ZoneInfo("Asia/Shanghai")
@@ -62,6 +63,31 @@ def command_smoke_data(args: argparse.Namespace) -> int:
     if args.cache_dir:
         path = ParquetBarCache(args.cache_dir).save(args.symbol, bars)
         print(f"cache={path}")
+    return 0
+
+
+def command_smoke_fundamentals(args: argparse.Namespace) -> int:
+    provider = AkshareSinaFinancialProvider()
+    facts = provider.get_statement(args.symbol, args.statement)
+    periods = facts["report_period"].drop_duplicates().sort_values()
+    announcements = facts["announcement_date"].drop_duplicates().sort_values()
+    payload = {
+        "provider": provider.name,
+        "symbol": str(args.symbol).zfill(6),
+        "statement": args.statement,
+        "fact_count": len(facts),
+        "report_period_count": len(periods),
+        "first_report_period": periods.iloc[0].date().isoformat(),
+        "last_report_period": periods.iloc[-1].date().isoformat(),
+        "first_announcement_date": announcements.iloc[0].date().isoformat(),
+        "last_announcement_date": announcements.iloc[-1].date().isoformat(),
+    }
+    print(json.dumps(payload, ensure_ascii=False, indent=2))
+    if args.output:
+        output = Path(args.output)
+        output.parent.mkdir(parents=True, exist_ok=True)
+        facts.to_parquet(output, index=False)
+        print(f"output={output}")
     return 0
 
 
@@ -127,6 +153,19 @@ def build_parser() -> argparse.ArgumentParser:
     smoke.add_argument("--adjust", default="qfq", choices=["", "qfq", "hfq"])
     smoke.add_argument("--cache-dir")
     smoke.set_defaults(func=command_smoke_data)
+
+    fundamentals = subparsers.add_parser(
+        "smoke-fundamentals",
+        help="Fetch and validate one disclosure-timestamped financial statement",
+    )
+    fundamentals.add_argument("--symbol", default="000001")
+    fundamentals.add_argument(
+        "--statement",
+        default="利润表",
+        choices=["资产负债表", "利润表", "现金流量表"],
+    )
+    fundamentals.add_argument("--output")
+    fundamentals.set_defaults(func=command_smoke_fundamentals)
 
     select = subparsers.add_parser(
         "select-sample",

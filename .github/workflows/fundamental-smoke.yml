@@ -1,0 +1,56 @@
+name: Phase 2 fundamental smoke
+
+on:
+  push:
+    branches:
+      - "phase/2b-pit-and-selection"
+    paths:
+      - "src/ashare_system/fundamentals/**"
+      - "src/ashare_system/cli.py"
+      - ".github/workflows/fundamental-smoke.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  real-financial-statement:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+      - name: Install
+        run: python -m pip install -e .
+      - name: Fetch disclosure-timestamped financial facts
+        run: >-
+          ashare-system smoke-fundamentals
+          --symbol 000001
+          --statement 利润表
+          --output reports/output/fundamental-smoke/000001-profit.parquet
+      - name: Verify point-in-time fields
+        run: |
+          python - <<'PY'
+          import pandas as pd
+
+          path = "reports/output/fundamental-smoke/000001-profit.parquet"
+          frame = pd.read_parquet(path)
+          assert len(frame) > 0
+          assert frame["report_period"].notna().all()
+          assert frame["announcement_date"].notna().all()
+          assert (frame["announcement_date"] >= frame["report_period"]).all()
+          print(
+              frame[["report_period", "announcement_date", "item", "value"]]
+              .tail(8)
+              .to_string(index=False)
+          )
+          PY
+      - name: Upload financial snapshot
+        uses: actions/upload-artifact@v4
+        with:
+          name: phase2-fundamentals-${{ github.run_id }}
+          path: reports/output/fundamental-smoke/
+          retention-days: 14
