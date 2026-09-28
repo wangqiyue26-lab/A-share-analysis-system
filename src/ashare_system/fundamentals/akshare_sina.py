@@ -1,7 +1,5 @@
 from __future__ import annotations
 
-from datetime import datetime
-
 import pandas as pd
 from tenacity import retry, stop_after_attempt, wait_exponential
 
@@ -85,8 +83,3 @@ class AkshareSinaFinancialProvider:
         if not frames:
             raise RuntimeError(f"No financial statements fetched for {symbol}")
         return pd.concat(frames, ignore_index=True)
-
-
-def retrieval_timestamp() -> str:
-    """Return a UTC provenance timestamp for callers that persist provider snapshots."""
-    return datetime.now().astimezone().astimezone().isoformat()
