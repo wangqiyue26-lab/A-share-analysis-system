@@ -9,8 +9,10 @@ from .base import MarketDataProvider
 from .schema import validate_bars
 
 
-class AkshareProvider(MarketDataProvider):
-    name = "akshare"
+class AkshareEastmoneyProvider(MarketDataProvider):
+    """AKShare daily bars backed by the Eastmoney interface."""
+
+    name = "akshare_eastmoney"
 
     _COLUMN_MAP: ClassVar[dict[str, str]] = {
         "日期": "trade_date",
@@ -34,7 +36,6 @@ class AkshareProvider(MarketDataProvider):
         end: str,
         adjust: str = "qfq",
     ) -> pd.DataFrame:
-        """Fetch A-share daily history through AKShare and normalize it."""
         import akshare as ak
 
         raw = ak.stock_zh_a_hist(
@@ -45,8 +46,12 @@ class AkshareProvider(MarketDataProvider):
             adjust=adjust,
         )
         if raw is None or raw.empty:
-            raise RuntimeError(f"AKShare returned no daily bars for {symbol} ({start}..{end})")
+            raise RuntimeError(f"AKShare Eastmoney returned no bars for {symbol} ({start}..{end})")
 
         frame = raw.rename(columns=self._COLUMN_MAP).copy()
         frame["symbol"] = str(symbol).zfill(6)
         return validate_bars(frame)
+
+
+# Backward-compatible alias used by early Phase 1 code.
+AkshareProvider = AkshareEastmoneyProvider

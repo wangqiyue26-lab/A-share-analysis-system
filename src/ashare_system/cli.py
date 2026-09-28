@@ -9,8 +9,10 @@ from pathlib import Path
 from zoneinfo import ZoneInfo
 
 from . import __version__
-from .data.akshare_provider import AkshareProvider
+from .data.akshare_provider import AkshareEastmoneyProvider
+from .data.akshare_sina_provider import AkshareSinaProvider
 from .data.cache import ParquetBarCache
+from .data.router import DataRouter
 
 CHINA_TZ = ZoneInfo("Asia/Shanghai")
 
@@ -35,12 +37,12 @@ def command_smoke_data(args: argparse.Namespace) -> int:
     today = datetime.now(CHINA_TZ).date()
     end = args.end or today.strftime("%Y%m%d")
     start = args.start or (today - timedelta(days=30)).strftime("%Y%m%d")
-    provider = AkshareProvider()
-    bars = provider.get_daily_bars(args.symbol, start, end, args.adjust)
+    router = DataRouter([AkshareEastmoneyProvider(), AkshareSinaProvider()])
+    bars = router.get_daily_bars(args.symbol, start, end, args.adjust)
     print(
         json.dumps(
             {
-                "provider": provider.name,
+                "provider": router.last_provider_name,
                 "symbol": str(args.symbol).zfill(6),
                 "rows": len(bars),
                 "first_trade_date": bars.iloc[0]["trade_date"].date().isoformat(),

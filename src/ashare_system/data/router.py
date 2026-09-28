@@ -14,6 +14,7 @@ class DataRouter:
         self.providers = list(providers)
         if not self.providers:
             raise ValueError("At least one market-data provider is required")
+        self.last_provider_name: str | None = None
 
     def get_daily_bars(
         self,
@@ -23,9 +24,12 @@ class DataRouter:
         adjust: str = "qfq",
     ) -> pd.DataFrame:
         failures: list[str] = []
+        self.last_provider_name = None
         for provider in self.providers:
             try:
-                return provider.get_daily_bars(symbol, start, end, adjust)
+                bars = provider.get_daily_bars(symbol, start, end, adjust)
+                self.last_provider_name = provider.name
+                return bars
             except Exception as exc:  # noqa: BLE001 - provider boundary must fail over safely
                 failures.append(f"{provider.name}: {type(exc).__name__}: {exc}")
         raise RuntimeError("All market-data providers failed: " + " | ".join(failures))

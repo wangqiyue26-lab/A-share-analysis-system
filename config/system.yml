@@ -5,7 +5,8 @@ project:
 
 data:
   provider_order:
-    - akshare
+    - akshare_eastmoney
+    - akshare_sina
   retries: 3
   retry_min_seconds: 1
   retry_max_seconds: 8

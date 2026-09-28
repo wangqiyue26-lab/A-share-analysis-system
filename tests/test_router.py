@@ -37,8 +37,8 @@ class WorkingProvider(MarketDataProvider):
 
 
 def test_router_fails_over_to_next_provider():
-    bars = DataRouter([BrokenProvider(), WorkingProvider()]).get_daily_bars(
-        "000001", "20240101", "20240103"
-    )
+    router = DataRouter([BrokenProvider(), WorkingProvider()])
+    bars = router.get_daily_bars("000001", "20240101", "20240103")
     assert len(bars) == 1
     assert bars.iloc[0]["symbol"] == "000001"
+    assert router.last_provider_name == "working"
