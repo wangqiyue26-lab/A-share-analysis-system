@@ -5,8 +5,8 @@ from .schema import BAR_COLUMNS, validate_bars
 from .security_master import AkshareSecurityMasterProvider, validate_security_master
 
 __all__ = [
-    "AkshareSecurityMasterProvider",
     "BAR_COLUMNS",
+    "AkshareSecurityMasterProvider",
     "DataRouter",
     "MarketDataProvider",
     "latest_metrics_as_of",
