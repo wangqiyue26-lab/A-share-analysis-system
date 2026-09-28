@@ -38,7 +38,17 @@ jobs:
           --top 5
           --output-dir reports/output/selection-smoke
       - name: Verify output
-        run: python -c "import pandas as pd; x=pd.read_csv('reports/output/selection-smoke/selected.csv', dtype={'symbol': str}); assert len(x) >= 2; print(x[['symbol','rank','composite_score']].to_string(index=False))"
+        run: |
+          python - <<'PY'
+          import pandas as pd
+
+          frame = pd.read_csv(
+              "reports/output/selection-smoke/selected.csv",
+              dtype={"symbol": str},
+          )
+          assert len(frame) >= 2
+          print(frame[["symbol", "rank", "composite_score"]].to_string(index=False))
+          PY
       - name: Upload selection artifact
         uses: actions/upload-artifact@v4
         with:
