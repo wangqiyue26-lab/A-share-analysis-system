@@ -1,8 +1,10 @@
 from __future__ import annotations
 
+from dataclasses import dataclass
 from pathlib import Path
 
 import pandas as pd
+from tenacity import retry, stop_after_attempt, wait_exponential
 
 SECURITY_MASTER_COLUMNS = (
     "symbol",
@@ -17,6 +19,26 @@ SECURITY_MASTER_COLUMNS = (
     "is_listed",
     "observed_at",
 )
+
+REQUIRED_EXCHANGES = frozenset({"SSE", "SZSE", "BSE"})
+
+
+@dataclass(frozen=True)
+class SecurityMasterFetchResult:
+    """Observable security-master snapshot plus exchange-level fetch diagnostics."""
+
+    master: pd.DataFrame
+    failures: tuple[str, ...]
+
+    @property
+    def fetched_exchanges(self) -> tuple[str, ...]:
+        if self.master.empty:
+            return ()
+        return tuple(sorted(self.master["exchange"].dropna().astype(str).unique()))
+
+    @property
+    def complete(self) -> bool:
+        return set(self.fetched_exchanges) == REQUIRED_EXCHANGES and not self.failures
 
 
 def _optional_series(frame: pd.DataFrame, column: str) -> pd.Series:
@@ -43,7 +65,7 @@ def validate_security_master(frame: pd.DataFrame) -> pd.DataFrame:
     result["is_listed"] = result["is_listed"].astype(bool)
     result["observed_at"] = pd.to_datetime(result["observed_at"], utc=True, errors="raise")
 
-    invalid_exchange = ~result["exchange"].isin({"SSE", "SZSE", "BSE"})
+    invalid_exchange = ~result["exchange"].isin(REQUIRED_EXCHANGES)
     if invalid_exchange.any():
         values = sorted(result.loc[invalid_exchange, "exchange"].unique())
         raise ValueError(f"Unsupported exchanges in security master: {values}")
@@ -124,43 +146,90 @@ def _finish_current_master(frame: pd.DataFrame, observed_at: pd.Timestamp) -> pd
 
 
 class AkshareSecurityMasterProvider:
-    """Build the current A-share master from official-exchange AKShare interfaces."""
+    """Build the current A-share master from exchange-oriented AKShare interfaces."""
 
     name = "akshare_exchange_security_master"
 
-    def get_current(self) -> pd.DataFrame:
+    @retry(stop=stop_after_attempt(3), wait=wait_exponential(multiplier=1, min=1, max=8), reraise=True)
+    def _fetch_sse(self, observed_at: pd.Timestamp) -> pd.DataFrame:
         import akshare as ak
 
-        observed_at = pd.Timestamp.now(tz="UTC")
-        sh_main = normalize_sh_security_master(
+        main = normalize_sh_security_master(
             ak.stock_info_sh_name_code(symbol="主板A股"),
             board="上证主板",
             observed_at=observed_at,
         )
-        sh_star = normalize_sh_security_master(
+        star = normalize_sh_security_master(
             ak.stock_info_sh_name_code(symbol="科创板"),
             board="科创板",
             observed_at=observed_at,
         )
-        sz = normalize_sz_security_master(
+        return validate_security_master(pd.concat([main, star], ignore_index=True))
+
+    @retry(stop=stop_after_attempt(3), wait=wait_exponential(multiplier=1, min=1, max=8), reraise=True)
+    def _fetch_szse(self, observed_at: pd.Timestamp) -> pd.DataFrame:
+        import akshare as ak
+
+        return normalize_sz_security_master(
             ak.stock_info_sz_name_code(symbol="A股列表"),
             observed_at=observed_at,
         )
-        bj = normalize_bj_security_master(
+
+    @retry(stop=stop_after_attempt(3), wait=wait_exponential(multiplier=1, min=1, max=8), reraise=True)
+    def _fetch_bse(self, observed_at: pd.Timestamp) -> pd.DataFrame:
+        import akshare as ak
+
+        return normalize_bj_security_master(
             ak.stock_info_bj_name_code(),
             observed_at=observed_at,
         )
-        return validate_security_master(pd.concat([sh_main, sh_star, sz, bj], ignore_index=True))
+
+    def fetch_current(self) -> SecurityMasterFetchResult:
+        """Fetch exchanges independently so one remote outage is visible rather than catastrophic."""
+        observed_at = pd.Timestamp.now(tz="UTC")
+        frames: list[pd.DataFrame] = []
+        failures: list[str] = []
+        fetchers = (
+            ("SSE", self._fetch_sse),
+            ("SZSE", self._fetch_szse),
+            ("BSE", self._fetch_bse),
+        )
+        for exchange, fetcher in fetchers:
+            try:
+                frame = fetcher(observed_at)
+                if frame.empty:
+                    raise RuntimeError("empty exchange security list")
+                frames.append(frame)
+            except Exception as exc:  # noqa: BLE001 - isolate exchange-provider failures
+                failures.append(f"{exchange}: {type(exc).__name__}: {exc}")
+
+        if not frames:
+            raise RuntimeError("All exchange security-master sources failed: " + " | ".join(failures))
+
+        master = validate_security_master(pd.concat(frames, ignore_index=True))
+        return SecurityMasterFetchResult(master=master, failures=tuple(failures))
+
+    def get_current(self, *, require_complete: bool = True) -> pd.DataFrame:
+        """Return current master and reject partial universes by default."""
+        result = self.fetch_current()
+        if require_complete and not result.complete:
+            details = " | ".join(result.failures) or "missing required exchange"
+            raise RuntimeError(f"Incomplete security master: {details}")
+        return result.master
 
 
 class SecurityMasterSnapshotStore:
-    """Append-only Parquet snapshots of the observable current security master."""
+    """Append-only Parquet snapshots of complete observable current security masters."""
 
     def __init__(self, root: str | Path = "data/cache") -> None:
         self.root = Path(root)
 
     def save(self, frame: pd.DataFrame) -> Path:
         master = validate_security_master(frame)
+        exchanges = set(master["exchange"].unique())
+        if exchanges != REQUIRED_EXCHANGES:
+            missing = sorted(REQUIRED_EXCHANGES - exchanges)
+            raise ValueError(f"Refusing to persist incomplete security master; missing={missing}")
         observed_at = master["observed_at"].max()
         stamp = observed_at.strftime("%Y%m%dT%H%M%SZ")
         path = self.root / "security_master" / f"{stamp}.parquet"
