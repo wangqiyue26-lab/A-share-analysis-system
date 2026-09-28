@@ -1,0 +1,26 @@
+version: 1
+
+scoring:
+  winsorize_lower: 0.05
+  winsorize_upper: 0.95
+  min_factor_coverage: 1.0
+
+factors:
+  momentum_20:
+    weight: 0.20
+    direction: higher
+  momentum_60:
+    weight: 0.20
+    direction: higher
+  trend_ma20_ma60:
+    weight: 0.15
+    direction: higher
+  volatility_20:
+    weight: 0.15
+    direction: lower
+  max_drawdown_60:
+    weight: 0.15
+    direction: lower
+  log_amount_20:
+    weight: 0.15
+    direction: higher
