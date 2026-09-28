@@ -33,3 +33,10 @@ def test_validate_bars_normalizes_symbol_and_sort_order():
 def test_validate_bars_rejects_missing_columns():
     with pytest.raises(ValueError, match="Missing canonical bar columns"):
         validate_bars(sample_frame().drop(columns=["amount"]))
+
+
+def test_validate_bars_rejects_multiple_symbols():
+    frame = sample_frame()
+    frame.loc[1, "symbol"] = "2"
+    with pytest.raises(ValueError, match="exactly one symbol"):
+        validate_bars(frame)

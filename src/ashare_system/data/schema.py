@@ -21,7 +21,7 @@ NUMERIC_BAR_COLUMNS = tuple(column for column in BAR_COLUMNS if column not in {"
 
 
 def validate_bars(frame: pd.DataFrame) -> pd.DataFrame:
-    """Validate and normalize the canonical daily-bar dataframe."""
+    """Validate and normalize the canonical daily-bar dataframe for exactly one symbol."""
     missing = [column for column in BAR_COLUMNS if column not in frame.columns]
     if missing:
         raise ValueError(f"Missing canonical bar columns: {missing}")
@@ -32,6 +32,10 @@ def validate_bars(frame: pd.DataFrame) -> pd.DataFrame:
     for column in NUMERIC_BAR_COLUMNS:
         result[column] = pd.to_numeric(result[column], errors="coerce")
 
+    if result.empty:
+        raise ValueError("Daily-bar dataframe must not be empty")
+    if result["symbol"].nunique(dropna=False) != 1:
+        raise ValueError("Canonical daily bars must contain exactly one symbol")
     if result["trade_date"].duplicated().any():
         raise ValueError("Duplicate trade_date values detected for a single symbol")
     if result["close"].isna().any():
