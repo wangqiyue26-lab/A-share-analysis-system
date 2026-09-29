@@ -9,6 +9,7 @@ from pathlib import Path
 from zoneinfo import ZoneInfo
 
 from . import __version__
+from .daily import DailyPipelineConfig, run_daily_selection
 from .data.akshare_provider import AkshareEastmoneyProvider
 from .data.akshare_sina_provider import AkshareSinaProvider
 from .data.cache import ParquetBarCache
@@ -169,6 +170,29 @@ def command_select_sample(args: argparse.Namespace) -> int:
     return 0
 
 
+def command_daily_select(args: argparse.Namespace) -> int:
+    result = run_daily_selection(
+        output_dir=args.output_dir,
+        cache_root=args.cache_root,
+        factor_config=args.factor_config,
+        config=DailyPipelineConfig(
+            prefilter_count=args.prefilter,
+            top_n=args.top,
+            min_spot_amount=args.min_spot_amount,
+            min_price=args.min_price,
+            history_calendar_days=args.history_days,
+            min_history=args.min_history,
+            min_average_amount_20=args.min_average_amount,
+            max_workers=args.workers,
+            max_stale_days=args.max_stale_days,
+            adjust=args.adjust,
+        ),
+        as_of=args.as_of,
+    )
+    print(json.dumps(result.metadata, ensure_ascii=False, indent=2))
+    return 0
+
+
 def command_build_site(args: argparse.Namespace) -> int:
     index = build_dashboard(
         args.output_dir,
@@ -232,6 +256,26 @@ def build_parser() -> argparse.ArgumentParser:
     select.add_argument("--top", type=int, default=20)
     select.add_argument("--output-dir", default="reports/output/latest")
     select.set_defaults(func=command_select_sample)
+
+    daily = subparsers.add_parser(
+        "daily-select",
+        help="Run the full-market liquidity prefilter and candidate factor ranking",
+    )
+    daily.add_argument("--output-dir", default="reports/output/daily")
+    daily.add_argument("--cache-root", default="data/cache")
+    daily.add_argument("--factor-config", default="config/factors.yml")
+    daily.add_argument("--prefilter", type=int, default=60)
+    daily.add_argument("--top", type=int, default=20)
+    daily.add_argument("--min-spot-amount", type=float, default=50_000_000.0)
+    daily.add_argument("--min-price", type=float, default=1.0)
+    daily.add_argument("--history-days", type=int, default=280)
+    daily.add_argument("--min-history", type=int, default=80)
+    daily.add_argument("--min-average-amount", type=float, default=20_000_000.0)
+    daily.add_argument("--workers", type=int, default=4)
+    daily.add_argument("--max-stale-days", type=int, default=7)
+    daily.add_argument("--adjust", default="hfq", choices=["", "qfq", "hfq"])
+    daily.add_argument("--as-of")
+    daily.set_defaults(func=command_daily_select)
 
     site = subparsers.add_parser("build-site", help="Build a static GitHub Pages dashboard")
     site.add_argument("--selection-dir")
