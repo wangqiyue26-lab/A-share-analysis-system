@@ -1,0 +1,101 @@
+name: Phase 3B portfolio report smoke
+
+on:
+  push:
+    branches:
+      - "phase/3b-portfolio-reporting"
+    paths:
+      - "src/ashare_system/backtest/**"
+      - "src/ashare_system/data/benchmark.py"
+      - ".github/workflows/portfolio-report-smoke.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  real-portfolio-report:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+      - name: Install
+        run: python -m pip install -e .
+      - name: Run real benchmark comparison
+        run: |
+          python - <<'PY'
+          import json
+          from pathlib import Path
+
+          import pandas as pd
+
+          from ashare_system.backtest import BacktestEngine, write_backtest_report
+          from ashare_system.data import AkshareBenchmarkProvider
+          from ashare_system.data.akshare_provider import AkshareEastmoneyProvider
+          from ashare_system.data.akshare_sina_provider import AkshareSinaProvider
+          from ashare_system.data.router import DataRouter
+
+          start = "20240102"
+          end = "20240329"
+          router = DataRouter([AkshareEastmoneyProvider(), AkshareSinaProvider()])
+          bars = router.get_daily_bars("000001", start, end, "")
+          dates = bars["trade_date"].sort_values().reset_index(drop=True)
+          assert len(dates) > 20
+
+          signals = pd.DataFrame(
+              [
+                  {
+                      "trade_date": dates.iloc[2],
+                      "symbol": "000001",
+                      "target_weight": 0.50,
+                      "board": "主板",
+                      "is_st": False,
+                  },
+                  {
+                      "trade_date": dates.iloc[-5],
+                      "symbol": "000001",
+                      "target_weight": 0.0,
+                      "board": "主板",
+                      "is_st": False,
+                  },
+              ]
+          )
+          result = BacktestEngine(initial_cash=100_000.0).run({"000001": bars}, signals)
+          benchmark = AkshareBenchmarkProvider().get_daily("000300", start, end)
+
+          output = Path("reports/output/portfolio-report-smoke")
+          paths = write_backtest_report(
+              output,
+              equity_curve=result.equity_curve,
+              trades=result.trades,
+              benchmark=benchmark,
+              performance_metrics=result.metrics,
+          )
+          summary = json.loads(paths["summary_json"].read_text(encoding="utf-8"))
+          assert summary["trade_count"] >= 2
+          assert summary["turnover"] > 0
+          assert "benchmark_return" in summary
+          assert "excess_return" in summary
+          print(
+              json.dumps(
+                  {
+                      "market_provider": router.last_provider_name,
+                      "benchmark_provider": benchmark.attrs.get("provider"),
+                      "benchmark_symbol": benchmark.attrs.get("symbol"),
+                      **summary,
+                  },
+                  ensure_ascii=False,
+                  indent=2,
+              )
+          )
+          PY
+      - name: Upload portfolio report artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: phase3b-portfolio-report-${{ github.run_id }}
+          path: reports/output/portfolio-report-smoke/
+          retention-days: 14
