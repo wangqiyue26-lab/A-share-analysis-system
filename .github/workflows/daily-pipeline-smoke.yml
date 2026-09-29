@@ -44,17 +44,17 @@ jobs:
               output_dir="reports/output/daily-pipeline-smoke",
               cache_root="data/cache",
               config=DailyPipelineConfig(
-                  prefilter_count=20,
-                  top_n=10,
+                  prefilter_count=60,
+                  top_n=20,
                   history_calendar_days=280,
                   max_workers=4,
                   adjust="hfq",
               ),
           )
           assert result.metadata["market_snapshot_rows"] > 4_000
-          assert result.metadata["prefilter_count"] == 20
-          assert result.metadata["history_fetched_count"] >= 10
-          assert result.metadata["ranked_count"] >= 10
+          assert result.metadata["prefilter_count"] == 60
+          assert result.metadata["history_fetched_count"] >= 40
+          assert result.metadata["ranked_count"] >= 20
           print(json.dumps(result.metadata, ensure_ascii=False, indent=2))
           PY
       - name: Verify ranking outputs
@@ -67,7 +67,7 @@ jobs:
           root = Path("reports/output/daily-pipeline-smoke")
           selected = pd.read_csv(root / "selected.csv", dtype={"symbol": str})
           summary = json.loads((root / "summary.json").read_text(encoding="utf-8"))
-          assert 1 <= len(selected) <= 10
+          assert 1 <= len(selected) <= 20
           assert summary["pipeline"] == "full_market_liquidity_prefilter"
           assert summary["market_snapshot_rows"] > 4_000
           print(selected[["rank", "symbol", "composite_score"]].to_string(index=False))
