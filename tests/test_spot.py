@@ -59,27 +59,10 @@ def test_liquidity_screen_filters_st_new_listing_and_disallowed_exchange():
     assert set(result["exchange"]) <= {"SSE", "SZSE"}
 
 
-def test_screen_has_size_fallback_when_spot_is_unavailable():
-    result = select_liquid_candidates(
-        _master(),
-        None,
-        as_of="2026-09-29",
-        limit=2,
-        min_listing_days=120,
-        allowed_exchanges=("SSE", "SZSE"),
-    )
-    assert list(result["symbol"]) == ["000001", "000002"]
-    assert set(result["screen_source"]) == {"security_master_size_fallback"}
-
-
-def test_screen_rejects_symbol_order_fallback_when_share_counts_are_missing():
-    master = _master()
-    master["float_shares"] = pd.NA
-    master["total_shares"] = pd.NA
-
-    with pytest.raises(RuntimeError, match="usable share-count size proxies"):
+def test_screen_fails_closed_when_spot_is_unavailable():
+    with pytest.raises(RuntimeError, match="spot snapshot is unavailable"):
         select_liquid_candidates(
-            master,
+            _master(),
             None,
             as_of="2026-09-29",
             limit=2,
