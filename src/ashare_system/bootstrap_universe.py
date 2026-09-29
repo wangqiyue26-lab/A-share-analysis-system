@@ -252,7 +252,7 @@ def write_bootstrap_universe(
             candidates = candidates.head(candidate_limit).reset_index(drop=True)
             screen_source = "candidate_cache_fallback"
             provider_source = "recent_candidate_cache"
-        except Exception as exc:  # noqa: BLE001 - fail closed after all bounded fallbacks
+        except Exception as exc:
             warnings.append(f"candidate_cache: {type(exc).__name__}: {exc}")
             raise RuntimeError("All cold-start universe sources failed: " + " | ".join(warnings)) from exc
     else:
