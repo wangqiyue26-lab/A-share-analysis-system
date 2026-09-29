@@ -1,0 +1,80 @@
+name: Phase 4B daily pipeline smoke
+
+on:
+  push:
+    branches:
+      - "phase/4b-market-universe"
+    paths:
+      - "src/ashare_system/daily.py"
+      - "src/ashare_system/data/spot.py"
+      - "config/factors.yml"
+      - ".github/workflows/daily-pipeline-smoke.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  live-daily-selection:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+      - name: Restore market history cache
+        uses: actions/cache@v4
+        with:
+          path: data/cache
+          key: ashare-hfq-${{ runner.os }}-${{ github.run_id }}
+          restore-keys: |
+            ashare-hfq-${{ runner.os }}-
+      - name: Install
+        run: python -m pip install -e .
+      - name: Run full-market prefilter and factor ranking
+        run: |
+          python - <<'PY'
+          import json
+
+          from ashare_system.daily import DailyPipelineConfig, run_daily_selection
+
+          result = run_daily_selection(
+              output_dir="reports/output/daily-pipeline-smoke",
+              cache_root="data/cache",
+              config=DailyPipelineConfig(
+                  prefilter_count=20,
+                  top_n=10,
+                  history_calendar_days=280,
+                  max_workers=4,
+                  adjust="hfq",
+              ),
+          )
+          assert result.metadata["market_snapshot_rows"] > 4_000
+          assert result.metadata["prefilter_count"] == 20
+          assert result.metadata["history_fetched_count"] >= 10
+          assert result.metadata["ranked_count"] >= 10
+          print(json.dumps(result.metadata, ensure_ascii=False, indent=2))
+          PY
+      - name: Verify ranking outputs
+        run: |
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          import pandas as pd
+
+          root = Path("reports/output/daily-pipeline-smoke")
+          selected = pd.read_csv(root / "selected.csv", dtype={"symbol": str})
+          summary = json.loads((root / "summary.json").read_text(encoding="utf-8"))
+          assert 1 <= len(selected) <= 10
+          assert summary["pipeline"] == "full_market_liquidity_prefilter"
+          assert summary["market_snapshot_rows"] > 4_000
+          print(selected[["rank", "symbol", "composite_score"]].to_string(index=False))
+          PY
+      - name: Upload daily selection artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: phase4b-daily-selection-${{ github.run_id }}
+          path: reports/output/daily-pipeline-smoke/
+          retention-days: 14
