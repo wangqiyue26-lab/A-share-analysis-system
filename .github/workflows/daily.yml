@@ -42,13 +42,15 @@ jobs:
         with:
           python-version: "3.11"
           cache: pip
-      - name: Restore security-master cache
+      - name: Restore universe caches
         uses: actions/cache@v4
         with:
-          path: data/cache/security_master
-          key: ashare-security-master-${{ runner.os }}-${{ github.run_id }}
+          path: |
+            data/cache/security_master
+            data/cache/candidate_universe
+          key: ashare-universe-${{ runner.os }}-${{ github.run_id }}
           restore-keys: |
-            ashare-security-master-${{ runner.os }}-
+            ashare-universe-${{ runner.os }}-
       - name: Install
         run: python -m pip install -e .
       - name: Prepare bounded SSE/SZSE candidate universe
@@ -67,11 +69,12 @@ jobs:
           set -e
           cat reports/universe/primary_prepare.log
           if [ "$status" -ne 0 ]; then
-            echo "Canonical security master unavailable; using non-persistent spot bootstrap."
+            echo "Canonical security master unavailable; entering bounded cold-start fallbacks."
             python -m ashare_system.bootstrap_universe \
               --candidate-limit 30 \
               --allowed-exchanges SSE,SZSE \
               --output-root reports/universe \
+              --cache-root data/cache \
               --reason-file reports/universe/primary_prepare.log
           fi
       - name: Verify candidate universe
@@ -90,7 +93,12 @@ jobs:
           if manifest.get("degraded_mode"):
               assert manifest["security_master_source"] == "spot_bootstrap_no_canonical_snapshot"
               assert manifest["listing_age_verified"] is False
-              assert frame["screen_source"].eq("bootstrap_eastmoney_spot_amount").all()
+              sources = set(frame["screen_source"].astype(str))
+              assert sources <= {
+                  "bootstrap_eastmoney_spot_amount",
+                  "bootstrap_sina_spot_amount",
+                  "candidate_cache_fallback",
+              }
           print(frame[["symbol", "name", "exchange", "screen_source"]].head(10).to_string(index=False))
           print(json.dumps(manifest, ensure_ascii=False, indent=2))
           PY
