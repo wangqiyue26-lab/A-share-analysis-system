@@ -24,6 +24,22 @@ CHINA_TZ = ZoneInfo("Asia/Shanghai")
 
 
 @dataclass(frozen=True)
+class UniversePreparationResult:
+    candidate_count: int
+    screen_source: str
+    candidates_file: str
+    manifest: str
+
+    def as_dict(self) -> dict[str, object]:
+        return {
+            "candidate_count": self.candidate_count,
+            "screen_source": self.screen_source,
+            "candidates_file": self.candidates_file,
+            "manifest": self.manifest,
+        }
+
+
+@dataclass(frozen=True)
 class DailyProductionResult:
     market_as_of: str
     candidate_count: int
@@ -76,6 +92,65 @@ def _complete_security_master(cache_root: Path) -> tuple[pd.DataFrame, str, str 
             f"current fetch failed: {warning}"
         )
     return cached, "security_master_cache", warning
+
+
+def prepare_daily_universe(
+    *,
+    output_root: str | Path = "reports/universe",
+    cache_root: str | Path = "data/cache",
+    candidate_limit: int = 30,
+    min_amount: float = 50_000_000.0,
+    min_listing_days: int = 120,
+    allowed_exchanges: tuple[str, ...] = ("SSE", "SZSE"),
+) -> UniversePreparationResult:
+    """Build today's bounded candidate list without making any history requests."""
+    output_root = Path(output_root)
+    cache_root = Path(cache_root)
+    output_root.mkdir(parents=True, exist_ok=True)
+    today = pd.Timestamp.now(tz=CHINA_TZ).tz_localize(None).normalize()
+
+    master, master_source, master_warning = _complete_security_master(cache_root)
+    spot = None
+    spot_warning: str | None = None
+    try:
+        spot = AkshareEastmoneySpotProvider().get_current()
+    except Exception as exc:  # noqa: BLE001 - deterministic security-master fallback below
+        spot_warning = f"{type(exc).__name__}: {exc}"
+
+    candidates = select_liquid_candidates(
+        master,
+        spot,
+        as_of=today,
+        limit=candidate_limit,
+        min_amount=min_amount,
+        min_listing_days=min_listing_days,
+        allowed_exchanges=allowed_exchanges,
+    )
+    if candidates.empty:
+        raise RuntimeError("Candidate preparation returned an empty universe")
+
+    candidates_file = output_root / "candidates.csv"
+    candidates.to_csv(candidates_file, index=False)
+    screen_source = str(candidates["screen_source"].iloc[0])
+    manifest_path = output_root / "universe_manifest.json"
+    manifest = {
+        "prepared_as_of": today.date().isoformat(),
+        "candidate_count": len(candidates),
+        "screen_source": screen_source,
+        "allowed_exchanges": list(allowed_exchanges),
+        "security_master_source": master_source,
+        "security_master_warning": master_warning,
+        "security_master_observed_at": master["observed_at"].max().isoformat(),
+        "spot_warning": spot_warning,
+        "candidates_file": str(candidates_file),
+    }
+    manifest_path.write_text(json.dumps(manifest, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    return UniversePreparationResult(
+        candidate_count=len(candidates),
+        screen_source=screen_source,
+        candidates_file=str(candidates_file),
+        manifest=str(manifest_path),
+    )
 
 
 def _fetch_one_history(
@@ -132,24 +207,44 @@ def _fetch_one_history(
     return symbol, frame, provider_name, warning
 
 
-def run_daily_production(
+def _load_candidates(path: str | Path) -> tuple[pd.DataFrame, dict[str, object]]:
+    path = Path(path)
+    frame = pd.read_csv(path, dtype={"symbol": str})
+    if "symbol" not in frame.columns:
+        raise ValueError("Candidate file must contain symbol")
+    frame["symbol"] = frame["symbol"].astype(str).str.zfill(6)
+    if "screen_source" not in frame.columns:
+        frame["screen_source"] = "external_candidate_file"
+    universe_manifest: dict[str, object] = {}
+    manifest_path = path.parent / "universe_manifest.json"
+    if manifest_path.exists():
+        universe_manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    return frame, universe_manifest
+
+
+def build_daily_from_candidates(
     *,
+    candidates_file: str | Path,
     output_root: str | Path = "reports/production",
     site_dir: str | Path = "site",
     cache_root: str | Path = "data/cache",
     factor_config: str | Path = "config/factors.yml",
-    candidate_limit: int = 30,
     top_n: int = 10,
     history_days: int = 420,
-    min_amount: float = 50_000_000.0,
-    min_listing_days: int = 120,
-    workers: int = 4,
-    adjust: str = "qfq",
+    workers: int = 2,
+    adjust: str = "",
 ) -> DailyProductionResult:
-    if candidate_limit < top_n:
-        raise ValueError("candidate_limit must be >= top_n")
+    """Fetch history and build ranking/site from a precomputed candidate artifact."""
+    if top_n <= 0:
+        raise ValueError("top_n must be positive")
     if workers <= 0 or workers > 8:
         raise ValueError("workers must be between 1 and 8")
+
+    candidates, universe_manifest = _load_candidates(candidates_file)
+    if len(candidates) < top_n:
+        raise RuntimeError(
+            f"Candidate file contains only {len(candidates)} names, below requested top_n={top_n}"
+        )
 
     output_root = Path(output_root)
     selection_dir = output_root / "selection"
@@ -157,31 +252,6 @@ def run_daily_production(
     site_dir = Path(site_dir)
     today = pd.Timestamp.now(tz=CHINA_TZ).tz_localize(None).normalize()
     start = today - pd.Timedelta(days=history_days)
-
-    master, master_source, master_warning = _complete_security_master(cache_root)
-
-    spot = None
-    spot_warning: str | None = None
-    try:
-        spot = AkshareEastmoneySpotProvider().get_current()
-    except Exception as exc:  # noqa: BLE001 - deterministic security-master fallback below
-        spot_warning = f"{type(exc).__name__}: {exc}"
-
-    candidates = select_liquid_candidates(
-        master,
-        spot,
-        as_of=today,
-        limit=candidate_limit,
-        min_amount=min_amount,
-        min_listing_days=min_listing_days,
-    )
-    if len(candidates) < top_n:
-        raise RuntimeError(
-            f"Candidate screen returned only {len(candidates)} names, below requested top_n={top_n}"
-        )
-    screen_source = str(candidates["screen_source"].iloc[0])
-    output_root.mkdir(parents=True, exist_ok=True)
-    candidates.to_csv(output_root / "candidates.csv", index=False)
 
     bars_by_symbol: dict[str, pd.DataFrame] = {}
     providers: dict[str, str] = {}
@@ -216,8 +286,10 @@ def run_daily_production(
                 refresh_warnings.append({"symbol": returned_symbol, "warning": warning})
 
     if len(bars_by_symbol) < top_n:
+        examples = failures[:5]
         raise RuntimeError(
-            f"Only {len(bars_by_symbol)} candidate histories were usable, below top_n={top_n}"
+            f"Only {len(bars_by_symbol)} candidate histories were usable, below top_n={top_n}; "
+            f"failure_examples={examples}"
         )
 
     latest_dates = {
@@ -257,15 +329,17 @@ def run_daily_production(
 
     summary = json.loads(paths["summary_json"].read_text(encoding="utf-8"))
     provider_counts = dict(Counter(providers.values()))
+    screen_source = str(candidates["screen_source"].iloc[0])
     summary.update(
         {
             "market_as_of": market_as_of.date().isoformat(),
             "candidate_count": len(candidates),
             "history_success_count": len(bars_by_symbol),
             "screen_source": screen_source,
-            "security_master_source": master_source,
-            "security_master_warning": master_warning,
-            "spot_warning": spot_warning,
+            "allowed_exchanges": universe_manifest.get("allowed_exchanges"),
+            "security_master_source": universe_manifest.get("security_master_source"),
+            "security_master_warning": universe_manifest.get("security_master_warning"),
+            "spot_warning": universe_manifest.get("spot_warning"),
             "history_provider_counts": provider_counts,
             "refresh_warning_count": len(refresh_warnings),
             "refresh_warnings": refresh_warnings,
@@ -289,15 +363,17 @@ def run_daily_production(
         "history_success_count": len(bars_by_symbol),
         "selected_count": int(summary.get("selected_count", 0)),
         "screen_source": screen_source,
-        "security_master_source": master_source,
-        "security_master_observed_at": master["observed_at"].max().isoformat(),
-        "spot_warning": spot_warning,
+        "allowed_exchanges": universe_manifest.get("allowed_exchanges"),
+        "security_master_source": universe_manifest.get("security_master_source"),
+        "security_master_observed_at": universe_manifest.get("security_master_observed_at"),
+        "spot_warning": universe_manifest.get("spot_warning"),
         "refresh_warning_count": len(refresh_warnings),
         "history_provider_counts": provider_counts,
         "selection_summary": str(paths["summary_json"]),
         "site_index": str(index),
         "strict_backtest_in_daily_page": False,
     }
+    manifest_path.parent.mkdir(parents=True, exist_ok=True)
     manifest_path.write_text(json.dumps(manifest, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
 
     return DailyProductionResult(
@@ -312,6 +388,44 @@ def run_daily_production(
     )
 
 
+def run_daily_production(
+    *,
+    output_root: str | Path = "reports/production",
+    site_dir: str | Path = "site",
+    cache_root: str | Path = "data/cache",
+    factor_config: str | Path = "config/factors.yml",
+    candidate_limit: int = 30,
+    top_n: int = 10,
+    history_days: int = 420,
+    min_amount: float = 50_000_000.0,
+    min_listing_days: int = 120,
+    workers: int = 2,
+    adjust: str = "",
+    allowed_exchanges: tuple[str, ...] = ("SSE", "SZSE"),
+) -> DailyProductionResult:
+    """Convenience local path; scheduled production uses separate runners/jobs."""
+    universe_dir = Path(output_root) / "universe"
+    prepare_daily_universe(
+        output_root=universe_dir,
+        cache_root=cache_root,
+        candidate_limit=candidate_limit,
+        min_amount=min_amount,
+        min_listing_days=min_listing_days,
+        allowed_exchanges=allowed_exchanges,
+    )
+    return build_daily_from_candidates(
+        candidates_file=universe_dir / "candidates.csv",
+        output_root=output_root,
+        site_dir=site_dir,
+        cache_root=cache_root,
+        factor_config=factor_config,
+        top_n=top_n,
+        history_days=history_days,
+        workers=workers,
+        adjust=adjust,
+    )
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="ashare-daily")
     parser.add_argument("--output-root", default="reports/production")
@@ -323,26 +437,58 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--history-days", type=int, default=420)
     parser.add_argument("--min-amount", type=float, default=50_000_000.0)
     parser.add_argument("--min-listing-days", type=int, default=120)
-    parser.add_argument("--workers", type=int, default=4)
-    parser.add_argument("--adjust", default="qfq", choices=["", "qfq", "hfq"])
+    parser.add_argument("--workers", type=int, default=2)
+    parser.add_argument("--adjust", default="", choices=["", "qfq", "hfq"])
+    parser.add_argument("--allowed-exchanges", default="SSE,SZSE")
+    parser.add_argument("--prepare-only", action="store_true")
+    parser.add_argument("--candidates-file")
     return parser
 
 
 def main() -> int:
     args = build_parser().parse_args()
-    result = run_daily_production(
-        output_root=args.output_root,
-        site_dir=args.site_dir,
-        cache_root=args.cache_root,
-        factor_config=args.factor_config,
-        candidate_limit=args.candidate_limit,
-        top_n=args.top,
-        history_days=args.history_days,
-        min_amount=args.min_amount,
-        min_listing_days=args.min_listing_days,
-        workers=args.workers,
-        adjust=args.adjust,
+    allowed_exchanges = tuple(
+        item.strip().upper() for item in args.allowed_exchanges.split(",") if item.strip()
     )
+    if args.prepare_only and args.candidates_file:
+        raise ValueError("--prepare-only and --candidates-file are mutually exclusive")
+
+    if args.prepare_only:
+        result = prepare_daily_universe(
+            output_root=args.output_root,
+            cache_root=args.cache_root,
+            candidate_limit=args.candidate_limit,
+            min_amount=args.min_amount,
+            min_listing_days=args.min_listing_days,
+            allowed_exchanges=allowed_exchanges,
+        )
+    elif args.candidates_file:
+        result = build_daily_from_candidates(
+            candidates_file=args.candidates_file,
+            output_root=args.output_root,
+            site_dir=args.site_dir,
+            cache_root=args.cache_root,
+            factor_config=args.factor_config,
+            top_n=args.top,
+            history_days=args.history_days,
+            workers=args.workers,
+            adjust=args.adjust,
+        )
+    else:
+        result = run_daily_production(
+            output_root=args.output_root,
+            site_dir=args.site_dir,
+            cache_root=args.cache_root,
+            factor_config=args.factor_config,
+            candidate_limit=args.candidate_limit,
+            top_n=args.top,
+            history_days=args.history_days,
+            min_amount=args.min_amount,
+            min_listing_days=args.min_listing_days,
+            workers=args.workers,
+            adjust=args.adjust,
+            allowed_exchanges=allowed_exchanges,
+        )
     print(json.dumps(result.as_dict(), ensure_ascii=False, indent=2))
     return 0
 

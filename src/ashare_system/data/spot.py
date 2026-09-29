@@ -1,9 +1,11 @@
 from __future__ import annotations
 
+from collections.abc import Collection
+
 import pandas as pd
 from tenacity import retry, stop_after_attempt, wait_exponential
 
-from .security_master import validate_security_master
+from .security_master import REQUIRED_EXCHANGES, validate_security_master
 
 SPOT_COLUMNS = (
     "symbol",
@@ -65,8 +67,13 @@ def select_liquid_candidates(
     limit: int = 30,
     min_amount: float = 50_000_000.0,
     min_listing_days: int = 120,
+    allowed_exchanges: Collection[str] | None = None,
 ) -> pd.DataFrame:
     """Build a bounded current research universe without silently accepting ST/new listings.
+
+    `allowed_exchanges` controls the production universe without weakening the canonical
+    security master. Phase 4B defaults the scheduled screen to SSE/SZSE while BSE history
+    support is validated independently.
 
     When the bulk spot endpoint is unavailable, the function deliberately falls back to
     a size proxy from the complete security master. This is less precise than liquidity
@@ -80,6 +87,15 @@ def select_liquid_candidates(
         raise ValueError("min_listing_days cannot be negative")
 
     master = validate_security_master(security_master)
+    if allowed_exchanges is not None:
+        allowed = {str(exchange).upper() for exchange in allowed_exchanges}
+        unknown = sorted(allowed - set(REQUIRED_EXCHANGES))
+        if unknown:
+            raise ValueError(f"Unsupported allowed exchanges: {unknown}")
+        if not allowed:
+            raise ValueError("allowed_exchanges cannot be empty")
+        master = master[master["exchange"].isin(allowed)].copy()
+
     cutoff = pd.Timestamp(as_of)
     if cutoff.tzinfo is not None:
         cutoff = cutoff.tz_localize(None)
@@ -93,7 +109,7 @@ def select_liquid_candidates(
         & master["list_date"].le(listed_before)
     ].copy()
     if eligible.empty:
-        raise RuntimeError("No eligible securities after listing/ST filters")
+        raise RuntimeError("No eligible securities after exchange/listing/ST filters")
 
     if spot is not None and not spot.empty:
         snapshot = spot.loc[:, SPOT_COLUMNS].copy()
