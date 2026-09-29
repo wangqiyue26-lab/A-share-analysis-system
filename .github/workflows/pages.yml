@@ -1,16 +1,6 @@
-name: Deploy A-share dashboard
+name: Manual A-share dashboard preview
 
 on:
-  push:
-    branches:
-      - main
-    paths:
-      - "src/**"
-      - "config/**"
-      - ".github/workflows/pages.yml"
-  schedule:
-    # 17:37 China Standard Time on weekdays.
-    - cron: "37 9 * * 1-5"
   workflow_dispatch:
 
 permissions:
@@ -47,7 +37,7 @@ jobs:
           ashare-system build-site
           --selection-dir reports/output/pages-latest
           --output-dir site
-          --mode-label "云端研究预览"
+          --mode-label "手动研究预览"
       - name: Configure Pages
         uses: actions/configure-pages@v5
       - name: Upload Pages artifact

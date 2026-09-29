@@ -9,10 +9,12 @@ from .security_master import (
     SecurityMasterSnapshotStore,
     validate_security_master,
 )
+from .spot import AkshareEastmoneySpotProvider, normalize_eastmoney_spot, select_liquid_candidates
 
 __all__ = [
     "BAR_COLUMNS",
     "AkshareBenchmarkProvider",
+    "AkshareEastmoneySpotProvider",
     "AkshareSecurityMasterProvider",
     "DataRouter",
     "MarketDataProvider",
@@ -20,7 +22,9 @@ __all__ = [
     "SecurityMasterSnapshotStore",
     "latest_metrics_as_of",
     "normalize_benchmark",
+    "normalize_eastmoney_spot",
     "pivot_latest_metrics",
+    "select_liquid_candidates",
     "to_index_symbol",
     "validate_bars",
     "validate_security_master",

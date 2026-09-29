@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "ashare-analysis-system"
-version = "0.2.1"
+version = "0.2.2"
 description = "Personal A-share quantitative research and stock-selection system"
 readme = "README.md"
 requires-python = ">=3.11"
@@ -25,6 +25,7 @@ dev = [
 
 [project.scripts]
 ashare-system = "ashare_system.cli:main"
+ashare-daily = "ashare_system.production:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]
