@@ -237,9 +237,42 @@ class SecurityMasterSnapshotStore:
         master.to_parquet(path, index=False)
         return path
 
+    def _snapshot_paths(self) -> list[Path]:
+        directory = self.root / "security_master"
+        return sorted(directory.glob("*.parquet"))
+
     def load_latest(self) -> pd.DataFrame:
         directory = self.root / "security_master"
-        candidates = sorted(directory.glob("*.parquet"))
+        candidates = self._snapshot_paths()
         if not candidates:
             raise FileNotFoundError(f"No security-master snapshots under {directory}")
         return validate_security_master(pd.read_parquet(candidates[-1]))
+
+    def load_as_of(self, as_of: str | pd.Timestamp) -> pd.DataFrame:
+        """Load the latest snapshot actually observed at or before a historical cutoff.
+
+        This method intentionally refuses to substitute a future/current universe for an
+        older backtest date. A caller must possess a retained snapshot no later than the
+        requested cutoff.
+        """
+        cutoff = pd.Timestamp(as_of)
+        if cutoff.tzinfo is None:
+            cutoff = cutoff.tz_localize("UTC")
+        else:
+            cutoff = cutoff.tz_convert("UTC")
+
+        directory = self.root / "security_master"
+        candidates = self._snapshot_paths()
+        if not candidates:
+            raise FileNotFoundError(f"No security-master snapshots under {directory}")
+
+        for path in reversed(candidates):
+            master = validate_security_master(pd.read_parquet(path))
+            observed_at = master["observed_at"].max()
+            if observed_at <= cutoff:
+                return master
+
+        raise FileNotFoundError(
+            "No security-master snapshot available at or before "
+            f"{cutoff.isoformat()}; earliest retained snapshot is newer"
+        )
