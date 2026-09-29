@@ -72,6 +72,22 @@ def test_screen_has_size_fallback_when_spot_is_unavailable():
     assert set(result["screen_source"]) == {"security_master_size_fallback"}
 
 
+def test_screen_rejects_symbol_order_fallback_when_share_counts_are_missing():
+    master = _master()
+    master["float_shares"] = pd.NA
+    master["total_shares"] = pd.NA
+
+    with pytest.raises(RuntimeError, match="usable share-count size proxies"):
+        select_liquid_candidates(
+            master,
+            None,
+            as_of="2026-09-29",
+            limit=2,
+            min_listing_days=120,
+            allowed_exchanges=("SSE", "SZSE"),
+        )
+
+
 def test_screen_rejects_unknown_exchange_filter():
     with pytest.raises(ValueError, match="Unsupported allowed exchanges"):
         select_liquid_candidates(
