@@ -75,9 +75,10 @@ def select_liquid_candidates(
     security master. Phase 4B defaults the scheduled screen to SSE/SZSE while BSE history
     support is validated independently.
 
-    When the bulk spot endpoint is unavailable, the function deliberately falls back to
-    a size proxy from the complete security master. This is less precise than liquidity
-    screening but avoids repeatedly hammering a second all-market endpoint.
+    When the bulk spot endpoint is unavailable, the function may use share counts from a
+    complete security master as a deterministic size proxy. If those fields are absent or
+    too sparse, it fails closed so the production workflow can use a separate market-data
+    fallback instead of silently degenerating into symbol-order selection.
     """
     if limit <= 0:
         raise ValueError("limit must be positive")
@@ -128,8 +129,14 @@ def select_liquid_candidates(
     eligible["size_proxy"] = eligible["size_proxy"].fillna(
         pd.to_numeric(eligible["total_shares"], errors="coerce")
     )
-    eligible["size_proxy"] = eligible["size_proxy"].fillna(0.0)
-    eligible["screen_source"] = "security_master_size_fallback"
-    return eligible.sort_values(
+    sized = eligible[eligible["size_proxy"].gt(0)].copy()
+    minimum_usable = min(limit, 10)
+    if len(sized) < minimum_usable:
+        raise RuntimeError(
+            "Security master does not contain enough usable share-count size proxies; "
+            "use a market-snapshot fallback"
+        )
+    sized["screen_source"] = "security_master_size_fallback"
+    return sized.sort_values(
         ["size_proxy", "symbol"], ascending=[False, True]
     ).head(limit).reset_index(drop=True)
