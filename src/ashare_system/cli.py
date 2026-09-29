@@ -17,6 +17,7 @@ from .data.router import DataRouter
 from .data.security_master import AkshareSecurityMasterProvider, SecurityMasterSnapshotStore
 from .factors import FactorEngine, load_factor_config
 from .reporting import write_selection_outputs
+from .site import build_dashboard
 
 CHINA_TZ = ZoneInfo("Asia/Shanghai")
 
@@ -168,6 +169,18 @@ def command_select_sample(args: argparse.Namespace) -> int:
     return 0
 
 
+def command_build_site(args: argparse.Namespace) -> int:
+    index = build_dashboard(
+        args.output_dir,
+        selection_dir=args.selection_dir,
+        backtest_dir=args.backtest_dir,
+        title=args.title,
+        mode_label=args.mode_label,
+    )
+    print(f"site={index}")
+    return 0
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="ashare-system")
     subparsers = parser.add_subparsers(dest="command", required=True)
@@ -219,6 +232,14 @@ def build_parser() -> argparse.ArgumentParser:
     select.add_argument("--top", type=int, default=20)
     select.add_argument("--output-dir", default="reports/output/latest")
     select.set_defaults(func=command_select_sample)
+
+    site = subparsers.add_parser("build-site", help="Build a static GitHub Pages dashboard")
+    site.add_argument("--selection-dir")
+    site.add_argument("--backtest-dir")
+    site.add_argument("--output-dir", default="site")
+    site.add_argument("--title", default="A股量化研究系统")
+    site.add_argument("--mode-label", default="研究预览")
+    site.set_defaults(func=command_build_site)
     return parser
 
 
