@@ -71,14 +71,11 @@ def select_liquid_candidates(
 ) -> pd.DataFrame:
     """Build a bounded current research universe without silently accepting ST/new listings.
 
-    `allowed_exchanges` controls the production universe without weakening the canonical
-    security master. Phase 4B defaults the scheduled screen to SSE/SZSE while BSE history
-    support is validated independently.
-
-    When the bulk spot endpoint is unavailable, the function may use share counts from a
-    complete security master as a deterministic size proxy. If those fields are absent or
-    too sparse, it fails closed so the production workflow can use a separate market-data
-    fallback instead of silently degenerating into symbol-order selection.
+    The production screen requires a current all-market snapshot so the bounded history
+    workload is selected by actual traded amount. If that snapshot is unavailable, this
+    function fails closed; the outer production workflow then uses its explicit provider
+    and recent-candidate-cache fallback chain. It never substitutes symbol order or share
+    count for liquidity without labeling that degradation.
     """
     if limit <= 0:
         raise ValueError("limit must be positive")
@@ -112,31 +109,18 @@ def select_liquid_candidates(
     if eligible.empty:
         raise RuntimeError("No eligible securities after exchange/listing/ST filters")
 
-    if spot is not None and not spot.empty:
-        snapshot = spot.loc[:, SPOT_COLUMNS].copy()
-        merged = eligible.merge(snapshot, on="symbol", how="inner", suffixes=("", "_spot"))
-        merged = merged[merged["amount"].ge(min_amount) & merged["last"].gt(0)].copy()
-        if not merged.empty:
-            merged["screen_source"] = "eastmoney_spot_amount"
-            merged = merged.sort_values(
-                ["amount", "float_market_cap", "symbol"],
-                ascending=[False, False, True],
-                na_position="last",
-            )
-            return merged.head(limit).reset_index(drop=True)
+    if spot is None or spot.empty:
+        raise RuntimeError("Current all-market spot snapshot is unavailable")
 
-    eligible["size_proxy"] = pd.to_numeric(eligible["float_shares"], errors="coerce")
-    eligible["size_proxy"] = eligible["size_proxy"].fillna(
-        pd.to_numeric(eligible["total_shares"], errors="coerce")
+    snapshot = spot.loc[:, SPOT_COLUMNS].copy()
+    merged = eligible.merge(snapshot, on="symbol", how="inner", suffixes=("", "_spot"))
+    merged = merged[merged["amount"].ge(min_amount) & merged["last"].gt(0)].copy()
+    if merged.empty:
+        raise RuntimeError("Current spot snapshot produced no eligible liquid candidates")
+    merged["screen_source"] = "eastmoney_spot_amount"
+    merged = merged.sort_values(
+        ["amount", "float_market_cap", "symbol"],
+        ascending=[False, False, True],
+        na_position="last",
     )
-    sized = eligible[eligible["size_proxy"].gt(0)].copy()
-    minimum_usable = min(limit, 10)
-    if len(sized) < minimum_usable:
-        raise RuntimeError(
-            "Security master does not contain enough usable share-count size proxies; "
-            "use a market-snapshot fallback"
-        )
-    sized["screen_source"] = "security_master_size_fallback"
-    return sized.sort_values(
-        ["size_proxy", "symbol"], ascending=[False, True]
-    ).head(limit).reset_index(drop=True)
+    return merged.head(limit).reset_index(drop=True)
