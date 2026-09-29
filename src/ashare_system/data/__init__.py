@@ -9,11 +9,13 @@ from .security_master import (
     SecurityMasterSnapshotStore,
     validate_security_master,
 )
+from .spot import AkshareSpotProvider, prefilter_spot_snapshot, validate_spot_snapshot
 
 __all__ = [
     "BAR_COLUMNS",
     "AkshareBenchmarkProvider",
     "AkshareSecurityMasterProvider",
+    "AkshareSpotProvider",
     "DataRouter",
     "MarketDataProvider",
     "SecurityMasterFetchResult",
@@ -21,7 +23,9 @@ __all__ = [
     "latest_metrics_as_of",
     "normalize_benchmark",
     "pivot_latest_metrics",
+    "prefilter_spot_snapshot",
     "to_index_symbol",
     "validate_bars",
     "validate_security_master",
+    "validate_spot_snapshot",
 ]
