@@ -25,7 +25,7 @@ concurrency:
 jobs:
   build:
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 25
     steps:
       - name: Checkout
         uses: actions/checkout@v6
@@ -34,20 +34,36 @@ jobs:
         with:
           python-version: "3.11"
           cache: pip
+      - name: Restore market history cache
+        uses: actions/cache@v4
+        with:
+          path: data/cache
+          key: pages-ashare-hfq-${{ runner.os }}-${{ github.run_id }}
+          restore-keys: |
+            pages-ashare-hfq-${{ runner.os }}-
+            ashare-hfq-${{ runner.os }}-
       - name: Install
         run: python -m pip install -e .
-      - name: Build cloud ranking preview
+      - name: Run full-market daily selection
         run: >-
-          ashare-system select-sample
-          --symbols 000001,600000,000333,600519,601318,000858,600036,601166,600276,601088
-          --top 10
+          ashare-system daily-select
+          --prefilter 60
+          --top 20
+          --workers 4
+          --cache-root data/cache
           --output-dir reports/output/pages-latest
       - name: Build static dashboard
         run: >-
           ashare-system build-site
           --selection-dir reports/output/pages-latest
           --output-dir site
-          --mode-label "云端研究预览"
+          --mode-label "全市场云端筛选"
+      - name: Verify production page
+        run: |
+          test -s site/index.html
+          test -f site/.nojekyll
+          grep -q "全市场覆盖" site/index.html
+          grep -q "不构成个股推荐" site/index.html
       - name: Configure Pages
         uses: actions/configure-pages@v5
       - name: Upload Pages artifact
