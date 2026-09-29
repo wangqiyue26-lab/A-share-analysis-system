@@ -17,7 +17,6 @@ on:
       - "pyproject.toml"
       - ".github/workflows/daily.yml"
   schedule:
-    # 17:23 China Standard Time on weekdays. Holiday runs safely use the latest market date.
     - cron: "23 9 * * 1-5"
   workflow_dispatch:
 
@@ -33,7 +32,7 @@ concurrency:
 jobs:
   universe:
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 20
     steps:
       - name: Checkout
         uses: actions/checkout@v6
@@ -69,7 +68,7 @@ jobs:
           set -e
           cat reports/universe/primary_prepare.log
           if [ "$status" -ne 0 ]; then
-            echo "Canonical security master unavailable; entering bounded cold-start fallbacks."
+            echo "Primary liquidity screen unavailable; entering explicit cold-start fallbacks."
             python -m ashare_system.bootstrap_universe \
               --candidate-limit 30 \
               --allowed-exchanges SSE,SZSE \
@@ -86,20 +85,24 @@ jobs:
 
           frame = pd.read_csv("reports/universe/candidates.csv", dtype={"symbol": str})
           manifest = json.loads(Path("reports/universe/universe_manifest.json").read_text(encoding="utf-8"))
-          assert len(frame) >= 10
+          assert len(frame) >= 30
           assert set(frame["exchange"]) <= {"SSE", "SZSE"}
           is_st = frame["is_st"].astype(str).str.lower().isin({"true", "1"})
           assert not is_st.any()
-          if manifest.get("degraded_mode"):
-              assert manifest["security_master_source"] == "spot_bootstrap_no_canonical_snapshot"
-              assert manifest["listing_age_verified"] is False
-              sources = set(frame["screen_source"].astype(str))
-              assert sources <= {
-                  "bootstrap_eastmoney_spot_amount",
-                  "bootstrap_sina_spot_amount",
-                  "candidate_cache_fallback",
-              }
-          print(frame[["symbol", "name", "exchange", "screen_source"]].head(10).to_string(index=False))
+          sources = set(frame["screen_source"].astype(str))
+          allowed_sources = {
+              "eastmoney_spot_amount",
+              "bootstrap_eastmoney_spot_amount",
+              "bootstrap_sina_spot_amount",
+              "candidate_cache_fallback",
+              "history_liquidity_fallback",
+          }
+          assert sources <= allowed_sources
+          if "history_liquidity_fallback" in sources:
+              assert manifest["listing_age_verified"] is True
+              assert frame["amount"].notna().all()
+              assert frame["amount"].min() >= 50_000_000
+          print(frame[["symbol", "name", "exchange", "screen_source", "amount"]].head(10).to_string(index=False))
           print(json.dumps(manifest, ensure_ascii=False, indent=2))
           PY
       - name: Upload candidate handoff
