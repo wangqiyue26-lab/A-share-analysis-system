@@ -39,7 +39,7 @@ class HistoryFetchResult:
     symbol: str
     bars: pd.DataFrame
     provider: str
-    stale_days: int
+    lag_days: int
     refresh_error: str | None = None
 
 
@@ -74,9 +74,6 @@ def _load_history(
     prefer_sina: bool,
     max_stale_days: int,
 ) -> HistoryFetchResult:
-    # Keep each adjustment regime in a separate cache tree. HFQ is used for the
-    # current technical-factor pipeline because old history does not need to be
-    # retroactively rewritten whenever a later corporate action occurs.
     adjustment_key = adjust or "raw"
     cache = ParquetBarCache(Path(cache_root) / adjustment_key)
     symbol = str(symbol).zfill(6)
@@ -111,28 +108,51 @@ def _load_history(
         )
         merged = _merge_bars(existing, fresh)
         cache.save(symbol, merged)
-        stale_days = max((end - pd.Timestamp(merged["trade_date"].max()).normalize()).days, 0)
+        lag_days = max((end - pd.Timestamp(merged["trade_date"].max()).normalize()).days, 0)
         return HistoryFetchResult(
             symbol=symbol,
             bars=merged,
             provider=router.last_provider_name or "unknown",
-            stale_days=stale_days,
+            lag_days=lag_days,
         )
     except Exception as exc:
         if existing.empty or last_cached is None:
             raise
-        stale_days = max((end - last_cached).days, 0)
-        if stale_days > max_stale_days:
+        lag_days = max((end - last_cached).days, 0)
+        if lag_days > max_stale_days:
             raise RuntimeError(
-                f"Cached history for {symbol} is {stale_days} days stale and refresh failed: {exc}"
+                f"Cached history for {symbol} is {lag_days} calendar days behind "
+                f"the requested date and refresh failed: {exc}"
             ) from exc
         return HistoryFetchResult(
             symbol=symbol,
             bars=validate_bars(existing),
-            provider="cache_stale_fallback",
-            stale_days=stale_days,
+            provider="cache_refresh_fallback",
+            lag_days=lag_days,
             refresh_error=f"{type(exc).__name__}: {exc}",
         )
+
+
+def _enrich_factor_result(
+    factor_result: FactorRunResult,
+    candidates: pd.DataFrame,
+) -> FactorRunResult:
+    wanted = [
+        "symbol",
+        "name",
+        "price",
+        "amount",
+        "turnover_pct",
+        "total_market_cap",
+        "float_market_cap",
+    ]
+    available = [column for column in wanted if column in candidates.columns]
+    metadata = candidates.loc[:, available].copy()
+    metadata["symbol"] = metadata["symbol"].astype(str).str.zfill(6)
+    ranking = factor_result.ranking.merge(metadata, on="symbol", how="left")
+    exclusion_meta = [column for column in ("symbol", "name") if column in metadata.columns]
+    exclusions = factor_result.exclusions.merge(metadata.loc[:, exclusion_meta], on="symbol", how="left")
+    return FactorRunResult(ranking=ranking, exclusions=exclusions)
 
 
 def run_daily_selection(
@@ -172,7 +192,8 @@ def run_daily_selection(
     bars_by_symbol: dict[str, pd.DataFrame] = {}
     failures: list[dict[str, str]] = []
     provider_counts: dict[str, int] = {}
-    stale_symbols: list[dict[str, object]] = []
+    lagging_symbols: list[dict[str, object]] = []
+    refresh_failure_count = 0
 
     with ThreadPoolExecutor(max_workers=cfg.max_workers) as executor:
         futures = {
@@ -194,11 +215,13 @@ def run_daily_selection(
                 item = future.result()
                 bars_by_symbol[symbol] = item.bars
                 provider_counts[item.provider] = provider_counts.get(item.provider, 0) + 1
-                if item.stale_days > 0 or item.refresh_error:
-                    stale_symbols.append(
+                if item.refresh_error:
+                    refresh_failure_count += 1
+                if item.lag_days > 0 or item.refresh_error:
+                    lagging_symbols.append(
                         {
                             "symbol": symbol,
-                            "stale_days": item.stale_days,
+                            "lag_days": item.lag_days,
                             "refresh_error": item.refresh_error,
                         }
                     )
@@ -215,7 +238,7 @@ def run_daily_selection(
         min_history=cfg.min_history,
         min_average_amount_20=cfg.min_average_amount_20,
     )
-    factor_result = engine.run(bars_by_symbol)
+    factor_result = _enrich_factor_result(engine.run(bars_by_symbol), candidates)
     paths = write_selection_outputs(
         factor_result,
         output_dir,
@@ -229,17 +252,21 @@ def run_daily_selection(
     paths["candidate_universe_csv"] = candidates_path
 
     ranked_count = int(factor_result.ranking["rank"].notna().sum())
+    data_dates = pd.to_datetime(factor_result.ranking.get("as_of"), errors="coerce").dropna()
     metadata: dict[str, object] = {
         "pipeline": "full_market_liquidity_prefilter",
         "as_of_requested": end.date().isoformat(),
+        "data_as_of_min": data_dates.min().date().isoformat() if not data_dates.empty else None,
+        "data_as_of_max": data_dates.max().date().isoformat() if not data_dates.empty else None,
         "market_snapshot_provider": spot.attrs.get("provider"),
         "market_snapshot_rows": len(spot),
         "prefilter_count": len(candidates),
         "history_fetched_count": len(bars_by_symbol),
         "history_failure_count": len(failures),
         "history_provider_counts": provider_counts,
-        "stale_symbol_count": len(stale_symbols),
-        "stale_symbols": stale_symbols,
+        "lagging_symbol_count": len(lagging_symbols),
+        "refresh_failure_count": refresh_failure_count,
+        "lagging_symbols": lagging_symbols,
         "ranked_count": ranked_count,
         "selected_count": min(ranked_count, cfg.top_n),
         "adjustment": cfg.adjust,
