@@ -7,7 +7,7 @@ from zoneinfo import ZoneInfo
 
 import pandas as pd
 
-from .data.spot import AkshareEastmoneySpotProvider, SPOT_COLUMNS
+from .data.spot import SPOT_COLUMNS, AkshareEastmoneySpotProvider
 
 CHINA_TZ = ZoneInfo("Asia/Shanghai")
 
