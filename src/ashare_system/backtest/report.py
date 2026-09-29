@@ -37,7 +37,7 @@ def trade_statistics(equity_curve: pd.DataFrame, trades: pd.DataFrame) -> dict[s
     sides = trades["side"].astype(str).str.lower()
     gross = float(notional.sum())
     return {
-        "trade_count": int(len(trades)),
+        "trade_count": len(trades),
         "buy_count": int((sides == "buy").sum()),
         "sell_count": int((sides == "sell").sum()),
         "gross_traded_notional": gross,
