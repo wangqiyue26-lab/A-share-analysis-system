@@ -3,7 +3,6 @@ from __future__ import annotations
 import json
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass
-from datetime import timedelta
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
@@ -89,10 +88,9 @@ def _load_history(
 
     start = pd.Timestamp(start).normalize()
     end = pd.Timestamp(end).normalize()
-    existing = existing[
-        (pd.to_datetime(existing.get("trade_date"), errors="coerce") >= start)
-        & (pd.to_datetime(existing.get("trade_date"), errors="coerce") <= end)
-    ].copy() if not existing.empty else existing
+    if not existing.empty:
+        dates = pd.to_datetime(existing["trade_date"], errors="coerce")
+        existing = existing[(dates >= start) & (dates <= end)].copy()
 
     if not existing.empty:
         last_cached = pd.Timestamp(existing["trade_date"].max()).normalize()
@@ -120,7 +118,7 @@ def _load_history(
             provider=router.last_provider_name or "unknown",
             stale_days=stale_days,
         )
-    except Exception as exc:  # noqa: BLE001 - stale-cache fallback is deliberate here
+    except Exception as exc:
         if existing.empty or last_cached is None:
             raise
         stale_days = max((end - last_cached).days, 0)
@@ -151,7 +149,10 @@ def run_daily_selection(
     if cfg.max_workers <= 0:
         raise ValueError("max_workers must be positive")
 
-    end = pd.Timestamp(as_of).normalize() if as_of is not None else pd.Timestamp.now(tz=CHINA_TZ).tz_localize(None).normalize()
+    if as_of is not None:
+        end = pd.Timestamp(as_of).normalize()
+    else:
+        end = pd.Timestamp.now(tz=CHINA_TZ).tz_localize(None).normalize()
     start = end - pd.Timedelta(days=cfg.history_calendar_days)
 
     spot = AkshareSpotProvider().get_snapshot()
@@ -247,5 +248,8 @@ def run_daily_selection(
     summary_path = paths["summary_json"]
     summary = json.loads(summary_path.read_text(encoding="utf-8"))
     summary.update(metadata)
-    summary_path.write_text(json.dumps(summary, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    summary_path.write_text(
+        json.dumps(summary, ensure_ascii=False, indent=2) + "\n",
+        encoding="utf-8",
+    )
     return DailySelectionResult(factor_result=factor_result, paths=paths, metadata=metadata)
