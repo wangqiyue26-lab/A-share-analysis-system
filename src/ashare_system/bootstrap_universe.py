@@ -109,7 +109,18 @@ def build_bootstrap_candidates(
         ["amount", "float_market_cap", "symbol"], ascending=[False, False, True], na_position="last"
     ).head(limit)
     return frame.loc[
-        :, ["symbol", "name", "exchange", "board", "is_st", "screen_source", "listing_age_verified", "amount", "float_market_cap"]
+        :,
+        [
+            "symbol",
+            "name",
+            "exchange",
+            "board",
+            "is_st",
+            "screen_source",
+            "listing_age_verified",
+            "amount",
+            "float_market_cap",
+        ],
     ].reset_index(drop=True)
 
 
@@ -154,25 +165,45 @@ def _history_liquidity_candidates(
         return symbol, float(amount.mean()), str(router.last_provider_name)
 
     measurements: list[tuple[str, float, str]] = []
+    history_failures: list[str] = []
     with ThreadPoolExecutor(max_workers=workers) as pool:
-        futures = {pool.submit(fetch_amount, str(symbol).zfill(6)): str(symbol).zfill(6) for symbol in eligible["symbol"]}
+        futures = {
+            pool.submit(fetch_amount, str(symbol).zfill(6)): str(symbol).zfill(6)
+            for symbol in eligible["symbol"]
+        }
         for future in as_completed(futures):
+            symbol = futures[future]
             try:
                 measurements.append(future.result())
-            except Exception:
-                continue
+            except (OSError, RuntimeError, ValueError) as exc:
+                history_failures.append(f"{symbol}:{type(exc).__name__}")
 
     amounts = pd.DataFrame(measurements, columns=["symbol", "amount", "history_provider"])
     amounts = amounts[amounts["amount"].ge(min_amount)].copy()
     if len(amounts) < limit:
-        raise RuntimeError(f"History-liquidity fallback produced only {len(amounts)} usable symbols; need {limit}")
+        raise RuntimeError(
+            f"History-liquidity fallback produced only {len(amounts)} usable symbols; "
+            f"need {limit}; failures={len(history_failures)}"
+        )
     result = eligible.merge(amounts, on="symbol", how="inner")
     result["screen_source"] = "history_liquidity_fallback"
     result["listing_age_verified"] = True
     result["float_market_cap"] = pd.NA
     result = result.sort_values(["amount", "symbol"], ascending=[False, True]).head(limit)
     return result.loc[
-        :, ["symbol", "name", "exchange", "board", "is_st", "screen_source", "listing_age_verified", "amount", "float_market_cap", "history_provider"]
+        :,
+        [
+            "symbol",
+            "name",
+            "exchange",
+            "board",
+            "is_st",
+            "screen_source",
+            "listing_age_verified",
+            "amount",
+            "float_market_cap",
+            "history_provider",
+        ],
     ].reset_index(drop=True)
 
 
@@ -197,15 +228,22 @@ def _save_candidate_cache(cache_root: Path, candidates: pd.DataFrame, *, source:
     candidates.to_csv(candidates_path, index=False)
     manifest_path.write_text(
         json.dumps(
-            {"saved_at": pd.Timestamp.now(tz="UTC").isoformat(), "source": source, "candidate_count": len(candidates)},
+            {
+                "saved_at": pd.Timestamp.now(tz="UTC").isoformat(),
+                "source": source,
+                "candidate_count": len(candidates),
+            },
             ensure_ascii=False,
             indent=2,
-        ) + "\n",
+        )
+        + "\n",
         encoding="utf-8",
     )
 
 
-def _load_recent_candidate_cache(cache_root: Path, *, max_age_days: int = 7) -> tuple[pd.DataFrame, dict[str, object]]:
+def _load_recent_candidate_cache(
+    cache_root: Path, *, max_age_days: int = 7
+) -> tuple[pd.DataFrame, dict[str, object]]:
     candidates_path, manifest_path = _candidate_cache_paths(cache_root)
     if not candidates_path.exists() or not manifest_path.exists():
         raise FileNotFoundError("No cached candidate universe")
@@ -250,7 +288,11 @@ def write_bootstrap_universe(
             break
         try:
             spot = getter()
-            screen_source = "bootstrap_eastmoney_spot_amount" if source_name.startswith("eastmoney") else "bootstrap_sina_spot_amount"
+            screen_source = (
+                "bootstrap_eastmoney_spot_amount"
+                if source_name.startswith("eastmoney")
+                else "bootstrap_sina_spot_amount"
+            )
             candidates = build_bootstrap_candidates(
                 spot,
                 limit=candidate_limit,
@@ -268,7 +310,7 @@ def write_bootstrap_universe(
             candidates = candidates.head(candidate_limit).reset_index(drop=True)
             screen_source = "candidate_cache_fallback"
             provider_source = "recent_candidate_cache"
-        except Exception as exc:
+        except (OSError, RuntimeError, ValueError, KeyError, json.JSONDecodeError) as exc:
             warnings.append(f"candidate_cache: {type(exc).__name__}: {exc}")
 
     if candidates is None:
@@ -281,7 +323,7 @@ def write_bootstrap_universe(
             )
             screen_source = "history_liquidity_fallback"
             provider_source = "security_master_plus_recent_daily_bars"
-        except Exception as exc:
+        except (OSError, RuntimeError, ValueError, KeyError) as exc:
             warnings.append(f"history_liquidity: {type(exc).__name__}: {exc}")
             raise RuntimeError("All cold-start universe sources failed: " + " | ".join(warnings)) from exc
 
@@ -301,13 +343,19 @@ def write_bootstrap_universe(
         "security_master_observed_at": None,
         "spot_provider_source": provider_source,
         "fallback_warnings": warnings,
-        "listing_age_verified": bool(candidates["listing_age_verified"].all()) if "listing_age_verified" in candidates else False,
+        "listing_age_verified": (
+            bool(candidates["listing_age_verified"].all())
+            if "listing_age_verified" in candidates
+            else False
+        ),
         "degraded_mode": True,
         "candidate_cache_origin": cache_manifest,
         "candidates_file": str(candidates_file),
     }
     manifest_path = output / "universe_manifest.json"
-    manifest_path.write_text(json.dumps(manifest, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
+    manifest_path.write_text(
+        json.dumps(manifest, ensure_ascii=False, indent=2) + "\n", encoding="utf-8"
+    )
     return manifest
 
 
@@ -324,7 +372,9 @@ def build_parser() -> argparse.ArgumentParser:
 
 def main() -> int:
     args = build_parser().parse_args()
-    exchanges = tuple(item.strip().upper() for item in args.allowed_exchanges.split(",") if item.strip())
+    exchanges = tuple(
+        item.strip().upper() for item in args.allowed_exchanges.split(",") if item.strip()
+    )
     manifest = write_bootstrap_universe(
         output_root=args.output_root,
         cache_root=args.cache_root,
