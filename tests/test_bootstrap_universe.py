@@ -1,6 +1,6 @@
 import pandas as pd
 
-from ashare_system.bootstrap_universe import build_bootstrap_candidates
+from ashare_system.bootstrap_universe import build_bootstrap_candidates, normalize_sina_spot
 from ashare_system.data.spot import SPOT_COLUMNS
 
 
@@ -21,6 +21,7 @@ def test_bootstrap_candidates_filters_st_exchange_and_liquidity():
         limit=10,
         min_amount=50_000_000.0,
         allowed_exchanges=("SSE", "SZSE"),
+        screen_source="bootstrap_eastmoney_spot_amount",
     )
 
     assert result["symbol"].tolist() == ["600001", "000001"]
@@ -43,3 +44,20 @@ def test_bootstrap_candidates_classifies_growth_and_star_boards():
     boards = dict(zip(result["symbol"], result["board"], strict=True))
     assert boards["688001"] == "科创板"
     assert boards["300001"] == "创业板"
+
+
+def test_normalize_sina_spot_extracts_prefixed_symbols():
+    raw = pd.DataFrame(
+        {
+            "代码": ["sh600001", "sz000001"],
+            "名称": ["沪股A", "深股A"],
+            "最新价": [10.0, 9.0],
+            "成交额": [200_000_000.0, 180_000_000.0],
+        }
+    )
+
+    result = normalize_sina_spot(raw)
+
+    assert result["symbol"].tolist() == ["600001", "000001"]
+    assert result["amount"].tolist() == [200_000_000.0, 180_000_000.0]
+    assert result["float_market_cap"].isna().all()
