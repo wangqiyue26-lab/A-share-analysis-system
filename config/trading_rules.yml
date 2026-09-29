@@ -8,8 +8,33 @@ execution:
 costs:
   commission_rate: 0.0003
   minimum_commission_cny: 5.0
-  sell_stamp_duty_rate: 0.0005
   slippage_bps: 5
+historical_rules:
+  stamp_duty:
+    supported_from: 2008-09-19
+    seller_only_rate_before_2023_08_28: 0.001
+    seller_only_rate_from_2023_08_28: 0.0005
+  price_limits:
+    main_board: 0.10
+    chinext_before_2020_08_24: 0.10
+    chinext_from_2020_08_24: 0.20
+    star_market: 0.20
+    bse: 0.30
+    st_main_before_2026_07_06: 0.05
+    st_main_from_2026_07_06: 0.10
+coverage:
+  modelled:
+    - next-trading-day execution
+    - T+1 sell restriction
+    - daily-bar suspension proxy using zero volume
+    - limit-up buy rejection and limit-down sell rejection
+    - board-lot rounding
+    - commission, sell stamp duty and configurable slippage
+  not_yet_modelled:
+    - IPO/no-price-limit windows
+    - ex-rights and ex-dividend reference-price adjustments
+    - intraday temporary suspensions and auction microstructure
+    - historical delisting/status-event reconstruction before retained snapshots
 notes:
-  - Values are configurable research defaults, not broker-specific truth.
-  - Board-specific price limits and historical rule changes are implemented in Phase 3.
+  - Cost values are configurable research defaults, not broker-specific truth.
+  - Unsupported historical regimes should fail explicitly instead of reusing current rules.
