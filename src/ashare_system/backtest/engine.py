@@ -81,7 +81,7 @@ class BacktestEngine:
         }
 
         for date in calendar:
-            for symbol in sorted(list(pending)):
+            for symbol in sorted(pending):
                 order = pending[symbol]
                 if date <= order.signal_date or symbol not in bars or date not in bars[symbol].index:
                     continue
