@@ -1,14 +1,16 @@
-name: Phase 4 dashboard smoke
+name: Phase 4B dashboard production smoke
 
 on:
   push:
     branches:
-      - "phase/4-dashboard-pages"
+      - "phase/4b-market-universe"
     paths:
       - "src/ashare_system/site.py"
       - "src/ashare_system/cli.py"
-      - "src/ashare_system/reporting.py"
+      - "src/ashare_system/daily.py"
+      - "src/ashare_system/data/spot.py"
       - ".github/workflows/dashboard-smoke.yml"
+      - ".github/workflows/pages.yml"
   workflow_dispatch:
 
 permissions:
@@ -17,43 +19,56 @@ permissions:
 jobs:
   live-dashboard-build:
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 25
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
           python-version: "3.11"
           cache: pip
+      - name: Restore market history cache
+        uses: actions/cache@v4
+        with:
+          path: data/cache
+          key: preview-ashare-hfq-${{ runner.os }}-${{ github.run_id }}
+          restore-keys: |
+            ashare-hfq-${{ runner.os }}-
       - name: Install
         run: python -m pip install -e .
-      - name: Build live sample ranking
+      - name: Run production-like full-market ranking
         run: >-
-          ashare-system select-sample
-          --symbols 000001,600000,000333,600519,601318,000858,600036,601166,600276,601088
-          --top 10
+          ashare-system daily-select
+          --prefilter 60
+          --top 20
+          --workers 4
+          --cache-root data/cache
           --output-dir reports/output/pages-preview
       - name: Build static dashboard
         run: >-
           ashare-system build-site
           --selection-dir reports/output/pages-preview
           --output-dir site
-          --mode-label "云端预发布"
+          --mode-label "全市场预发布"
       - name: Verify site
         run: |
           test -s site/index.html
           test -f site/.nojekyll
           grep -q "A股量化研究系统" site/index.html
+          grep -q "全市场覆盖" site/index.html
           grep -q "不构成个股推荐" site/index.html
           python - <<'PY'
           import json
           from pathlib import Path
           meta = json.loads(Path("site/site-meta.json").read_text(encoding="utf-8"))
           assert meta["selection_rows"] > 0
+          assert meta["market_snapshot_rows"] > 4000
+          assert meta["prefilter_count"] == 60
+          assert meta["data_as_of"] != "—"
           print(json.dumps(meta, ensure_ascii=False, indent=2))
           PY
       - name: Upload dashboard preview
         uses: actions/upload-artifact@v4
         with:
-          name: phase4-dashboard-preview-${{ github.run_id }}
+          name: phase4b-dashboard-preview-${{ github.run_id }}
           path: site/
           retention-days: 14
