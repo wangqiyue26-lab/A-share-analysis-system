@@ -4,10 +4,10 @@ on:
   push:
     branches:
       - main
-      - "phase/4e-workflow-reliability"
     paths:
       - "src/ashare_system/production.py"
       - "src/ashare_system/bootstrap_universe.py"
+      - "src/ashare_system/archive_security_master.py"
       - "src/ashare_system/enrich_daily.py"
       - "src/ashare_system/fundamentals_pipeline.py"
       - "src/ashare_system/data/spot.py"
@@ -15,6 +15,7 @@ on:
       - "src/ashare_system/data/financials.py"
       - "src/ashare_system/data/pit_cache.py"
       - "src/ashare_system/data/point_in_time.py"
+      - "src/ashare_system/data/security_master.py"
       - "src/ashare_system/factors/**"
       - "src/ashare_system/reporting.py"
       - "src/ashare_system/site.py"
@@ -110,6 +111,27 @@ jobs:
           print(frame[["symbol", "name", "exchange", "screen_source", "amount"]].head(10).to_string(index=False))
           print(json.dumps(manifest, ensure_ascii=False, indent=2))
           PY
+      - name: Stage strict-research security-master snapshot
+        shell: bash
+        run: |
+          mkdir -p reports/security-master-archive
+          set +e
+          python -m ashare_system.archive_security_master \
+            --cache-root data/cache \
+            --output-dir reports/security-master-archive \
+            >reports/security-master-archive/archive.log 2>&1
+          status=$?
+          set -e
+          cat reports/security-master-archive/archive.log
+          if [ "$status" -ne 0 ]; then
+            echo "No complete canonical security-master snapshot was available to archive on this run."
+          fi
+      - name: Upload 90-day security-master research snapshot
+        uses: actions/upload-artifact@v4
+        with:
+          name: security-master-snapshot-${{ github.run_id }}
+          path: reports/security-master-archive/
+          retention-days: 90
       - name: Upload candidate handoff
         uses: actions/upload-artifact@v4
         with:
