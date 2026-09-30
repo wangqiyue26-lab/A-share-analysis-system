@@ -10,6 +10,8 @@ on:
       - "src/ashare_system/bootstrap_universe.py"
       - "src/ashare_system/archive_security_master.py"
       - "src/ashare_system/enrich_daily.py"
+      - "src/ashare_system/shadow_trading.py"
+      - "src/ashare_system/backtest/**"
       - "src/ashare_system/fundamentals_pipeline.py"
       - "src/ashare_system/data/spot.py"
       - "src/ashare_system/data/cache.py"
@@ -28,7 +30,7 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: read
+  contents: write
   pages: write
   id-token: write
 
@@ -197,6 +199,17 @@ jobs:
           --workers 2
           --refresh-days 7
           --stale-days 30
+      - name: Run scheduled shadow portfolio
+        if: github.ref == 'refs/heads/main' && (github.event_name == 'schedule' || github.event_name == 'workflow_dispatch')
+        run: >-
+          python -m ashare_system.shadow_trading
+          --selected-file reports/production/selection/selected.csv
+          --ledger-root research/shadow
+          --output-dir reports/production/shadow
+          --site-dir site
+          --cache-root data/cache
+          --initial-cash 1000000
+          --workers 2
       - name: Verify production outputs
         run: |
           python - <<'PY'
@@ -218,9 +231,42 @@ jobs:
           assert manifest["fundamental_scoring_integration"] is False
           index = Path("site/index.html").read_text(encoding="utf-8")
           assert "fundamentals.html" in index
+          shadow_metrics = Path("reports/production/shadow/metrics.json")
+          if shadow_metrics.exists():
+              shadow = json.loads(shadow_metrics.read_text(encoding="utf-8"))
+              assert shadow["real_money_ready"] is False
+              assert Path("site/shadow.html").exists()
+              assert "shadow.html" in Path("site/index.html").read_text(encoding="utf-8")
+              print(json.dumps(shadow, ensure_ascii=False, indent=2))
           print(json.dumps(manifest, ensure_ascii=False, indent=2))
           print(json.dumps(fundamental, ensure_ascii=False, indent=2))
           PY
+      - name: Upload shadow-signal backup
+        if: github.ref == 'refs/heads/main' && (github.event_name == 'schedule' || github.event_name == 'workflow_dispatch')
+        uses: actions/upload-artifact@v4
+        with:
+          name: shadow-ledger-${{ github.run_id }}
+          path: research/shadow/signals/
+          retention-days: 90
+      - name: Persist immutable shadow signal
+        if: github.ref == 'refs/heads/main' && (github.event_name == 'schedule' || github.event_name == 'workflow_dispatch')
+        shell: bash
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add research/shadow/signals/*.csv
+          if git diff --cached --quiet; then
+            echo "Shadow signal already persisted for this market date."
+          else
+            signal_date=$(python - <<'PY'
+          import pandas as pd
+          frame = pd.read_csv("reports/production/selection/selected.csv")
+          print(pd.to_datetime(frame["as_of"]).max().date().isoformat())
+          PY
+            )
+            git commit -m "shadow: lock signal ${signal_date}"
+            git push origin HEAD:main
+          fi
       - name: Upload research artifact
         uses: actions/upload-artifact@v4
         with:
