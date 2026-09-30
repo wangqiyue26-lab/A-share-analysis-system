@@ -7,6 +7,7 @@ from zoneinfo import ZoneInfo
 
 import pandas as pd
 
+from .bootstrap_universe import _history_liquidity_candidates, _load_recent_candidate_cache
 from .data.security_master import (
     AkshareSecurityMasterProvider,
     SecurityMasterSnapshotStore,
@@ -75,49 +76,101 @@ def prepare_robust_universe(
     min_spot_coverage: float = 0.80,
     allowed_exchanges: tuple[str, ...] = ("SSE", "SZSE"),
 ) -> dict[str, object]:
-    """Build a bounded live universe using independent first-class spot providers."""
+    """Build a bounded universe through live, cache and history-liquidity layers."""
     output = Path(output_root)
     cache = Path(cache_root)
     output.mkdir(parents=True, exist_ok=True)
     today = pd.Timestamp.now(tz=CHINA_TZ).tz_localize(None).normalize()
 
     master, master_source, master_warning = _complete_security_master(cache)
-    live = fetch_live_spot(
-        master,
-        allowed_exchanges=allowed_exchanges,
-        min_coverage=min_spot_coverage,
-    )
-    candidates = select_liquid_candidates(
-        master,
-        live.frame,
-        as_of=today,
-        limit=candidate_limit,
-        min_amount=min_amount,
-        min_listing_days=min_listing_days,
-        allowed_exchanges=allowed_exchanges,
-        screen_source=live.screen_source,
-    )
-    if len(candidates) < candidate_limit:
-        raise RuntimeError(
-            f"Live liquidity screen produced only {len(candidates)} candidates; need {candidate_limit}"
+    warnings: list[str] = []
+    live_provider: str | None = None
+    live_coverage: float | None = None
+    cache_origin: dict[str, object] | None = None
+    degraded = master_source == "security_master_cache"
+
+    candidates: pd.DataFrame | None = None
+    screen_source: str | None = None
+
+    try:
+        live = fetch_live_spot(
+            master,
+            allowed_exchanges=allowed_exchanges,
+            min_coverage=min_spot_coverage,
         )
+        warnings.extend(live.warnings)
+        candidates = select_liquid_candidates(
+            master,
+            live.frame,
+            as_of=today,
+            limit=candidate_limit,
+            min_amount=min_amount,
+            min_listing_days=min_listing_days,
+            allowed_exchanges=allowed_exchanges,
+            screen_source=live.screen_source,
+        )
+        if len(candidates) < candidate_limit:
+            raise RuntimeError(
+                f"Live liquidity screen produced only {len(candidates)} candidates; need {candidate_limit}"
+            )
+        candidates["listing_age_verified"] = True
+        screen_source = live.screen_source
+        live_provider = live.provider_name
+        live_coverage = live.coverage
+    except Exception as exc:  # noqa: BLE001 - continue into explicit stale-data layers
+        warnings.append(f"live_spot_chain: {type(exc).__name__}: {exc}")
+        candidates = None
+
+    if candidates is None:
+        degraded = True
+        try:
+            cached, cache_origin = _load_recent_candidate_cache(cache, max_age_days=3)
+            cached = cached.head(candidate_limit).reset_index(drop=True)
+            if len(cached) < candidate_limit:
+                raise RuntimeError(
+                    f"Recent candidate cache has only {len(cached)} rows; need {candidate_limit}"
+                )
+            candidates = cached
+            screen_source = "candidate_cache_fallback"
+        except Exception as exc:  # noqa: BLE001 - continue into history-liquidity fallback
+            warnings.append(f"candidate_cache: {type(exc).__name__}: {exc}")
+            candidates = None
+
+    if candidates is None:
+        degraded = True
+        try:
+            candidates = _history_liquidity_candidates(
+                cache,
+                limit=candidate_limit,
+                min_amount=min_amount,
+                allowed_exchanges=allowed_exchanges,
+            )
+            screen_source = "history_liquidity_fallback"
+        except Exception as exc:  # noqa: BLE001 - final fail-closed boundary
+            warnings.append(f"history_liquidity: {type(exc).__name__}: {exc}")
+            raise RuntimeError("All universe source layers failed: " + " | ".join(warnings)) from exc
 
     candidates_file = output / "candidates.csv"
     candidates.to_csv(candidates_file, index=False)
     manifest = {
         "prepared_as_of": today.date().isoformat(),
         "candidate_count": len(candidates),
-        "screen_source": live.screen_source,
+        "screen_source": screen_source,
         "allowed_exchanges": list(allowed_exchanges),
         "security_master_source": master_source,
         "security_master_warning": master_warning,
         "security_master_observed_at": master["observed_at"].max().isoformat(),
-        "spot_provider_source": live.provider_name,
-        "spot_coverage": live.coverage,
-        "spot_provider_warnings": list(live.warnings),
-        "spot_warning": " | ".join(live.warnings) if live.warnings else None,
-        "listing_age_verified": True,
-        "degraded_mode": master_source == "security_master_cache",
+        "spot_provider_source": live_provider,
+        "spot_coverage": live_coverage,
+        "spot_provider_warnings": warnings,
+        "spot_warning": " | ".join(warnings) if warnings else None,
+        "listing_age_verified": (
+            bool(candidates["listing_age_verified"].all())
+            if "listing_age_verified" in candidates
+            else False
+        ),
+        "degraded_mode": degraded,
+        "candidate_cache_origin": cache_origin,
         "candidates_file": str(candidates_file),
     }
     manifest_path = output / "universe_manifest.json"
@@ -125,7 +178,9 @@ def prepare_robust_universe(
         json.dumps(manifest, ensure_ascii=False, indent=2) + "\n",
         encoding="utf-8",
     )
-    _save_candidate_cache(cache, candidates, manifest)
+
+    if screen_source in {"sina_spot_amount", "eastmoney_spot_amount", "history_liquidity_fallback"}:
+        _save_candidate_cache(cache, candidates, manifest)
     return manifest
 
 
