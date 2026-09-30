@@ -1,6 +1,7 @@
 from .base import MarketDataProvider
 from .benchmark import AkshareBenchmarkProvider, normalize_benchmark, to_index_symbol
-from .point_in_time import latest_metrics_as_of, pivot_latest_metrics
+from .pit_cache import ParquetPointInTimeCache
+from .point_in_time import available_metrics_as_of, latest_metrics_as_of, pivot_latest_metrics
 from .router import DataRouter
 from .schema import BAR_COLUMNS, validate_bars
 from .security_master import (
@@ -18,8 +19,10 @@ __all__ = [
     "AkshareSecurityMasterProvider",
     "DataRouter",
     "MarketDataProvider",
+    "ParquetPointInTimeCache",
     "SecurityMasterFetchResult",
     "SecurityMasterSnapshotStore",
+    "available_metrics_as_of",
     "latest_metrics_as_of",
     "normalize_benchmark",
     "normalize_eastmoney_spot",
