@@ -6,6 +6,7 @@ on:
       - main
     paths:
       - "src/ashare_system/production.py"
+      - "src/ashare_system/robust_universe.py"
       - "src/ashare_system/bootstrap_universe.py"
       - "src/ashare_system/archive_security_master.py"
       - "src/ashare_system/enrich_daily.py"
@@ -63,10 +64,10 @@ jobs:
         run: |
           mkdir -p reports/universe
           set +e
-          ashare-daily \
-            --prepare-only \
+          python -m ashare_system.robust_universe \
             --candidate-limit 30 \
             --allowed-exchanges SSE,SZSE \
+            --min-spot-coverage 0.80 \
             --output-root reports/universe \
             --cache-root data/cache \
             >reports/universe/primary_prepare.log 2>&1
@@ -74,7 +75,7 @@ jobs:
           set -e
           cat reports/universe/primary_prepare.log
           if [ "$status" -ne 0 ]; then
-            echo "Primary liquidity screen unavailable; entering explicit cold-start fallbacks."
+            echo "All validated live spot sources unavailable; entering explicit cache/history fallbacks."
             python -m ashare_system.bootstrap_universe \
               --candidate-limit 30 \
               --allowed-exchanges SSE,SZSE \
@@ -96,14 +97,21 @@ jobs:
           is_st = frame["is_st"].astype(str).str.lower().isin({"true", "1"})
           assert not is_st.any()
           sources = set(frame["screen_source"].astype(str))
-          allowed_sources = {
-              "eastmoney_spot_amount",
+          live_sources = {"sina_spot_amount", "eastmoney_spot_amount"}
+          allowed_sources = live_sources | {
               "bootstrap_eastmoney_spot_amount",
               "bootstrap_sina_spot_amount",
               "candidate_cache_fallback",
               "history_liquidity_fallback",
           }
           assert sources <= allowed_sources
+          if sources <= live_sources:
+              assert manifest["listing_age_verified"] is True
+              assert float(manifest["spot_coverage"]) >= 0.80
+              assert manifest["spot_provider_source"] in {
+                  "akshare_sina_all_a_spot",
+                  "akshare_eastmoney_all_a_spot",
+              }
           if "history_liquidity_fallback" in sources:
               assert manifest["listing_age_verified"] is True
               assert frame["amount"].notna().all()
