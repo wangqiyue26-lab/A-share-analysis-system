@@ -14,6 +14,7 @@ permissions:
 jobs:
   unit:
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -32,6 +33,7 @@ jobs:
   public-data-smoke:
     needs: unit
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     continue-on-error: true
     steps:
       - uses: actions/checkout@v4
@@ -42,11 +44,14 @@ jobs:
       - name: Install
         run: python -m pip install -e .
       - name: Multi-endpoint A-share network smoke test
+        timeout-minutes: 5
         run: ashare-system smoke-data --symbol 000001 --start 20240102 --end 20240110 --adjust ""
       - name: Exchange security-master smoke test
+        timeout-minutes: 5
         continue-on-error: true
         run: ashare-system security-master-smoke
       - name: PIT financial statements and factor smoke test
+        timeout-minutes: 5
         continue-on-error: true
         run: |
           python - <<'PY'
