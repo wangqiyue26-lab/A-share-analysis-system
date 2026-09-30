@@ -3,7 +3,7 @@ import json
 import pandas as pd
 
 import ashare_system.robust_universe as robust
-from ashare_system.data.spot import LiveSpotResult, SPOT_COLUMNS
+from ashare_system.data.spot import SPOT_COLUMNS, LiveSpotResult
 
 
 def _master() -> pd.DataFrame:
