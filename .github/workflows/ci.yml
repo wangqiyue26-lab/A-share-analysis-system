@@ -46,3 +46,33 @@ jobs:
       - name: Exchange security-master smoke test
         continue-on-error: true
         run: ashare-system security-master-smoke
+      - name: PIT financial statements and factor smoke test
+        continue-on-error: true
+        run: |
+          python - <<'PY'
+          from datetime import datetime, timezone
+          import json
+
+          from ashare_system.data.financials import AkshareSinaFinancialProvider
+          from ashare_system.factors import FUNDAMENTAL_FACTOR_COLUMNS, compute_fundamental_factors
+
+          symbol = "600519"
+          facts = AkshareSinaFinancialProvider().get_all(symbol)
+          factors = compute_fundamental_factors(facts, datetime.now(timezone.utc).isoformat())
+          assert not facts.empty
+          assert not factors.empty
+          row = factors.iloc[0]
+          payload = {
+              "symbol": symbol,
+              "fact_count": len(facts),
+              "metric_count": int(facts["metric"].nunique()),
+              "report_period_count": int(facts["period_end"].nunique()),
+              "fundamental_period_end": row["fundamental_period_end"].date().isoformat(),
+              "fundamental_coverage": float(row["fundamental_coverage"]),
+              "available_factors": [
+                  name for name in FUNDAMENTAL_FACTOR_COLUMNS if row[name] == row[name]
+              ],
+          }
+          print(json.dumps(payload, ensure_ascii=False, indent=2))
+          assert row["fundamental_coverage"] >= 0.6
+          PY
