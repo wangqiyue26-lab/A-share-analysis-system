@@ -34,7 +34,7 @@ class ParquetPointInTimeCache:
             raise FileNotFoundError(f"No PIT cache metadata for {str(symbol).zfill(6)}")
         payload = json.loads(path.read_text(encoding="utf-8"))
         if not isinstance(payload, dict):
-            raise ValueError("PIT cache metadata must be a JSON object")
+            raise TypeError("PIT cache metadata must be a JSON object")
         return payload
 
     def last_refreshed_at(self, symbol: str) -> pd.Timestamp:
