@@ -26,6 +26,12 @@ def _bars(opens, closes, volumes=None):
     return frame
 
 
+def _bars_for_symbol(symbol, opens, closes):
+    frame = _bars(opens, closes)
+    frame["symbol"] = symbol
+    return frame
+
+
 def _signal(date, weight):
     return {
         "trade_date": pd.Timestamp(date),
@@ -69,3 +75,42 @@ def test_suspension_with_zero_volume_defers_order():
     assert len(result.trades) == 1
     assert result.trades.iloc[0]["trade_date"] == pd.Timestamp("2024-01-04")
     assert result.metrics["max_drawdown"] <= 0
+
+
+def test_exit_uses_original_chinext_price_limit_rule():
+    chinext = _bars_for_symbol(
+        "300001",
+        [10.0, 10.0, 8.8, 8.9],
+        [10.0, 10.0, 8.8, 8.9],
+    )
+    replacement = _bars_for_symbol(
+        "600000",
+        [10.0, 10.0, 10.0, 10.0],
+        [10.0, 10.0, 10.0, 10.0],
+    )
+    signals = pd.DataFrame(
+        [
+            {
+                "trade_date": pd.Timestamp("2024-01-02"),
+                "symbol": "300001",
+                "target_weight": 0.5,
+                "board": "创业板",
+                "is_st": False,
+            },
+            {
+                "trade_date": pd.Timestamp("2024-01-03"),
+                "symbol": "600000",
+                "target_weight": 0.5,
+                "board": "主板",
+                "is_st": False,
+            },
+        ]
+    )
+    result = BacktestEngine(
+        rules=TradingRuleSet(slippage_bps=0),
+        initial_cash=100_000,
+    ).run({"300001": chinext, "600000": replacement}, signals)
+
+    chinext_trades = result.trades[result.trades["symbol"] == "300001"]
+    assert list(chinext_trades["side"]) == ["buy", "sell"]
+    assert chinext_trades.iloc[-1]["trade_date"] == pd.Timestamp("2024-01-04")

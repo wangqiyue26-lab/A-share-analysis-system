@@ -22,6 +22,8 @@ class BacktestResult:
 class _Position:
     shares: int = 0
     last_buy_date: pd.Timestamp | None = None
+    board: str = "主板"
+    is_st: bool = False
 
 
 @dataclass
@@ -93,17 +95,19 @@ class BacktestEngine:
                 if history.empty:
                     continue
                 previous_close = float(history.iloc[-1]["close"])
-                limit_pct = self.rules.price_limit_pct(
-                    trade_date=date,
-                    board=order.board,
-                    is_st=order.is_st,
-                )
 
                 raw_open = float(row["open"])
                 pos = positions[symbol]
                 open_equity = self._portfolio_value(cash, positions, bars, date, field="open")
                 target_value = open_equity * float(order.target_weight)
                 side_guess = "buy" if target_value > pos.shares * raw_open else "sell"
+                board = order.board if side_guess == "buy" or pos.shares <= 0 else pos.board
+                is_st = order.is_st if side_guess == "buy" or pos.shares <= 0 else pos.is_st
+                limit_pct = self.rules.price_limit_pct(
+                    trade_date=date,
+                    board=board,
+                    is_st=is_st,
+                )
                 if is_limit_blocked(
                     side=side_guess,
                     open_price=raw_open,
@@ -154,6 +158,8 @@ class BacktestEngine:
                     cash -= total_cash
                     pos.shares += quantity
                     pos.last_buy_date = date
+                    pos.board = order.board
+                    pos.is_st = order.is_st
                 else:
                     quantity = min(quantity, pos.shares)
                     if quantity <= 0:
@@ -192,7 +198,13 @@ class BacktestEngine:
                 wanted = set(group["symbol"])
                 for symbol, pos in positions.items():
                     if pos.shares > 0 and symbol not in wanted:
-                        pending[symbol] = _PendingTarget(symbol, date, 0.0, "主板", False)
+                        pending[symbol] = _PendingTarget(
+                            symbol,
+                            date,
+                            0.0,
+                            pos.board,
+                            pos.is_st,
+                        )
                 for _, signal in group.iterrows():
                     pending[str(signal["symbol"])] = _PendingTarget(
                         symbol=str(signal["symbol"]),
