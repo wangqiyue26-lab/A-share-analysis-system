@@ -11,6 +11,7 @@ from .bootstrap_universe import _history_liquidity_candidates, _load_recent_cand
 from .data.security_master import (
     AkshareSecurityMasterProvider,
     SecurityMasterSnapshotStore,
+    validate_security_master,
 )
 from .data.spot import fetch_live_spot, select_liquid_candidates
 
@@ -57,6 +58,7 @@ def _save_candidate_cache(cache_root: Path, candidates: pd.DataFrame, manifest: 
                 "spot_provider_source": manifest.get("spot_provider_source"),
                 "spot_coverage": manifest.get("spot_coverage"),
                 "security_master_source": manifest.get("security_master_source"),
+                "listing_age_verified": bool(manifest.get("listing_age_verified")),
             },
             ensure_ascii=False,
             indent=2,
@@ -64,6 +66,60 @@ def _save_candidate_cache(cache_root: Path, candidates: pd.DataFrame, manifest: 
         + "\n",
         encoding="utf-8",
     )
+
+
+def _validate_cached_candidates(
+    candidates: pd.DataFrame,
+    master: pd.DataFrame,
+    *,
+    as_of: pd.Timestamp,
+    limit: int,
+    min_amount: float,
+    min_listing_days: int,
+    allowed_exchanges: tuple[str, ...],
+) -> pd.DataFrame:
+    """Revalidate a recent candidate cache against the current observable security master."""
+    required = {"symbol", "amount"}
+    missing = sorted(required - set(candidates.columns))
+    if missing:
+        raise ValueError(f"Candidate cache missing columns: {missing}")
+
+    frame = candidates.copy()
+    frame["symbol"] = frame["symbol"].astype(str).str.zfill(6)
+    frame["amount"] = pd.to_numeric(frame["amount"], errors="coerce")
+
+    current = validate_security_master(master)
+    allowed = {item.upper() for item in allowed_exchanges}
+    listed_before = as_of.normalize() - pd.Timedelta(days=min_listing_days)
+    eligible = current[
+        current["exchange"].isin(allowed)
+        & current["is_listed"]
+        & ~current["is_st"]
+        & current["list_date"].notna()
+        & current["list_date"].le(listed_before)
+    ].copy()
+
+    cached_columns = [
+        column
+        for column in ["symbol", "amount", "float_market_cap", "history_provider"]
+        if column in frame.columns
+    ]
+    merged = eligible.merge(frame.loc[:, cached_columns], on="symbol", how="inner")
+    merged = merged[merged["amount"].ge(min_amount)].copy()
+    merged["screen_source"] = "candidate_cache_fallback"
+    merged["listing_age_verified"] = True
+    if "float_market_cap" not in merged:
+        merged["float_market_cap"] = pd.NA
+    merged = merged.sort_values(
+        ["amount", "float_market_cap", "symbol"],
+        ascending=[False, False, True],
+        na_position="last",
+    ).head(limit)
+    if len(merged) < limit:
+        raise RuntimeError(
+            f"Recent candidate cache has only {len(merged)} currently eligible liquid rows; need {limit}"
+        )
+    return merged.reset_index(drop=True)
 
 
 def prepare_robust_universe(
@@ -125,12 +181,15 @@ def prepare_robust_universe(
         degraded = True
         try:
             cached, cache_origin = _load_recent_candidate_cache(cache, max_age_days=3)
-            cached = cached.head(candidate_limit).reset_index(drop=True)
-            if len(cached) < candidate_limit:
-                raise RuntimeError(
-                    f"Recent candidate cache has only {len(cached)} rows; need {candidate_limit}"
-                )
-            candidates = cached
+            candidates = _validate_cached_candidates(
+                cached,
+                master,
+                as_of=today,
+                limit=candidate_limit,
+                min_amount=min_amount,
+                min_listing_days=min_listing_days,
+                allowed_exchanges=allowed_exchanges,
+            )
             screen_source = "candidate_cache_fallback"
         except Exception as exc:  # noqa: BLE001 - continue into history-liquidity fallback
             warnings.append(f"candidate_cache: {type(exc).__name__}: {exc}")
