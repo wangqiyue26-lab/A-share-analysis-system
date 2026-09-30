@@ -2,6 +2,7 @@ import pandas as pd
 import pytest
 
 from ashare_system.data.point_in_time import (
+    available_metrics_as_of,
     latest_metrics_as_of,
     pivot_latest_metrics,
     validate_point_in_time_metrics,
@@ -19,6 +20,20 @@ def sample_pit() -> pd.DataFrame:
             "source": ["demo", "demo", "restatement", "demo"],
         }
     )
+
+
+def test_available_metrics_as_of_keeps_report_history_and_latest_visible_revision():
+    visible = available_metrics_as_of(sample_pit(), "2024-05-10")
+    pingan = visible[visible["symbol"] == "000001"].sort_values("period_end")
+    assert pingan["value"].tolist() == pytest.approx([0.10, 0.12])
+
+    revised = available_metrics_as_of(sample_pit(), "2024-06-01")
+    march = revised[
+        (revised["symbol"] == "000001")
+        & (revised["period_end"] == pd.Timestamp("2024-03-31", tz="UTC"))
+    ].iloc[0]
+    assert march["value"] == pytest.approx(0.125)
+    assert march["available_at"] == pd.Timestamp("2024-05-15", tz="UTC")
 
 
 def test_latest_metrics_as_of_excludes_future_announcements():

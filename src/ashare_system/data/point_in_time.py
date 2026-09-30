@@ -34,11 +34,16 @@ def validate_point_in_time_metrics(frame: pd.DataFrame) -> pd.DataFrame:
     key = ["symbol", "metric", "period_end", "available_at", "source"]
     if result.duplicated(key).any():
         raise ValueError("Duplicate point-in-time observations detected")
-    return result.sort_values(["symbol", "metric", "period_end", "available_at"]).reset_index(drop=True)
+    return result.sort_values(["symbol", "metric", "period_end", "available_at", "source"]).reset_index(drop=True)
 
 
-def latest_metrics_as_of(frame: pd.DataFrame, as_of: str | pd.Timestamp) -> pd.DataFrame:
-    """Return the latest actually-available metric for every symbol/metric at a cutoff."""
+def available_metrics_as_of(frame: pd.DataFrame, as_of: str | pd.Timestamp) -> pd.DataFrame:
+    """Return every report-period metric version that was actually visible at a cutoff.
+
+    When a metric/report-period has multiple revisions, only the latest revision that
+    had become available by ``as_of`` is retained. Future announcements and future
+    restatements are excluded before de-duplication.
+    """
     data = validate_point_in_time_metrics(frame)
     cutoff = pd.Timestamp(as_of)
     if cutoff.tzinfo is None:
@@ -51,7 +56,20 @@ def latest_metrics_as_of(frame: pd.DataFrame, as_of: str | pd.Timestamp) -> pd.D
         return eligible
 
     eligible = eligible.sort_values(
-        ["symbol", "metric", "period_end", "available_at"],
+        ["symbol", "metric", "period_end", "available_at", "source"],
+        ascending=True,
+    )
+    return eligible.drop_duplicates(["symbol", "metric", "period_end"], keep="last").reset_index(drop=True)
+
+
+def latest_metrics_as_of(frame: pd.DataFrame, as_of: str | pd.Timestamp) -> pd.DataFrame:
+    """Return the latest actually-available metric for every symbol/metric at a cutoff."""
+    eligible = available_metrics_as_of(frame, as_of)
+    if eligible.empty:
+        return eligible
+
+    eligible = eligible.sort_values(
+        ["symbol", "metric", "period_end", "available_at", "source"],
         ascending=True,
     )
     return eligible.drop_duplicates(["symbol", "metric"], keep="last").reset_index(drop=True)
