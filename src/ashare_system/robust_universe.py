@@ -146,7 +146,7 @@ def prepare_robust_universe(
                 allowed_exchanges=allowed_exchanges,
             )
             screen_source = "history_liquidity_fallback"
-        except Exception as exc:  # noqa: BLE001 - final fail-closed boundary
+        except Exception as exc:
             warnings.append(f"history_liquidity: {type(exc).__name__}: {exc}")
             raise RuntimeError("All universe source layers failed: " + " | ".join(warnings)) from exc
 
