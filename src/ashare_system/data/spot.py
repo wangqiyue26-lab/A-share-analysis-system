@@ -1,6 +1,8 @@
 from __future__ import annotations
 
-from collections.abc import Collection
+from collections.abc import Collection, Sequence
+from dataclasses import dataclass
+from typing import Protocol
 
 import pandas as pd
 from tenacity import retry, stop_after_attempt, wait_exponential
@@ -16,6 +18,22 @@ SPOT_COLUMNS = (
     "market_cap",
     "float_market_cap",
 )
+
+
+class SpotProvider(Protocol):
+    name: str
+    screen_source: str
+
+    def get_current(self) -> pd.DataFrame: ...
+
+
+@dataclass(frozen=True)
+class LiveSpotResult:
+    frame: pd.DataFrame
+    provider_name: str
+    screen_source: str
+    coverage: float
+    warnings: tuple[str, ...]
 
 
 def normalize_eastmoney_spot(raw: pd.DataFrame) -> pd.DataFrame:
@@ -38,25 +56,132 @@ def normalize_eastmoney_spot(raw: pd.DataFrame) -> pd.DataFrame:
             "float_market_cap": raw["流通市值"],
         }
     )
+    return _finish_spot(frame, source="Eastmoney")
+
+
+def normalize_sina_spot(raw: pd.DataFrame) -> pd.DataFrame:
+    """Normalize AKShare's independent Sina all-A-share snapshot."""
+    if raw is None or raw.empty:
+        raise RuntimeError("Sina all-A-share snapshot is empty")
+    required = {"代码", "名称", "最新价", "成交额"}
+    missing = sorted(required - set(raw.columns))
+    if missing:
+        raise ValueError(f"Sina spot payload missing columns: {missing}")
+
+    symbols = raw["代码"].astype(str).str.extract(r"(\d{6})$", expand=False)
+    frame = pd.DataFrame(
+        {
+            "symbol": symbols,
+            "name": raw["名称"].astype(str),
+            "last": raw["最新价"],
+            "amount": raw["成交额"],
+            "turnover_pct": pd.NA,
+            "market_cap": pd.NA,
+            "float_market_cap": pd.NA,
+        }
+    )
+    return _finish_spot(frame, source="Sina")
+
+
+def _finish_spot(frame: pd.DataFrame, *, source: str) -> pd.DataFrame:
+    result = frame.copy()
+    result = result[result["symbol"].notna()].copy()
+    result["symbol"] = result["symbol"].astype(str).str.zfill(6)
     for column in SPOT_COLUMNS[2:]:
-        frame[column] = pd.to_numeric(frame[column], errors="coerce")
-    frame = frame.drop_duplicates("symbol", keep="last")
-    frame = frame[frame["last"].gt(0)].copy()
-    if frame.empty:
-        raise RuntimeError("Eastmoney all-A-share snapshot contains no valid prices")
-    return frame.loc[:, SPOT_COLUMNS].reset_index(drop=True)
+        result[column] = pd.to_numeric(result[column], errors="coerce")
+    result = result.drop_duplicates("symbol", keep="last")
+    result = result[result["last"].gt(0) & result["amount"].ge(0)].copy()
+    if result.empty:
+        raise RuntimeError(f"{source} all-A-share snapshot contains no valid prices")
+    return result.loc[:, SPOT_COLUMNS].reset_index(drop=True)
+
+
+class AkshareSinaSpotProvider:
+    """Independent Sina all-A-share live snapshot used as the cloud-first source."""
+
+    name = "akshare_sina_all_a_spot"
+    screen_source = "sina_spot_amount"
+
+    @retry(stop=stop_after_attempt(2), wait=wait_exponential(multiplier=1, min=1, max=4), reraise=True)
+    def get_current(self) -> pd.DataFrame:
+        import akshare as ak
+
+        return normalize_sina_spot(ak.stock_zh_a_spot())
 
 
 class AkshareEastmoneySpotProvider:
-    """One-call all-A-share screen used only to reduce per-symbol history requests."""
+    """Eastmoney all-A-share live snapshot; useful but often rate-limited on cloud IPs."""
 
     name = "akshare_eastmoney_all_a_spot"
+    screen_source = "eastmoney_spot_amount"
 
-    @retry(stop=stop_after_attempt(3), wait=wait_exponential(multiplier=1, min=1, max=8), reraise=True)
+    @retry(stop=stop_after_attempt(2), wait=wait_exponential(multiplier=1, min=1, max=4), reraise=True)
     def get_current(self) -> pd.DataFrame:
         import akshare as ak
 
         return normalize_eastmoney_spot(ak.stock_zh_a_spot_em())
+
+
+def live_spot_coverage(
+    security_master: pd.DataFrame,
+    spot: pd.DataFrame,
+    *,
+    allowed_exchanges: Collection[str] = ("SSE", "SZSE"),
+) -> float:
+    """Return coverage of currently listed exchange symbols by a live snapshot."""
+    master = validate_security_master(security_master)
+    allowed = {str(exchange).upper() for exchange in allowed_exchanges}
+    eligible = master[master["is_listed"] & master["exchange"].isin(allowed)].copy()
+    if eligible.empty:
+        raise RuntimeError("Security master contains no listed symbols for live spot validation")
+    spot_symbols = set(spot["symbol"].astype(str).str.zfill(6))
+    return float(eligible["symbol"].isin(spot_symbols).mean())
+
+
+def fetch_live_spot(
+    security_master: pd.DataFrame,
+    *,
+    allowed_exchanges: Collection[str] = ("SSE", "SZSE"),
+    min_coverage: float = 0.80,
+    providers: Sequence[SpotProvider] | None = None,
+) -> LiveSpotResult:
+    """Fetch a current all-market snapshot from independent first-class providers.
+
+    Sina is deliberately tried first on GitHub-hosted runners because Eastmoney's all-market
+    endpoint frequently closes connections or rate-limits cloud IPs. Both sources are treated
+    as live primary sources. Cache/history fallbacks belong outside this function.
+    """
+    if not 0 < min_coverage <= 1:
+        raise ValueError("min_coverage must be in (0, 1]")
+
+    chain: Sequence[SpotProvider] = providers or (
+        AkshareSinaSpotProvider(),
+        AkshareEastmoneySpotProvider(),
+    )
+    warnings: list[str] = []
+    for provider in chain:
+        try:
+            frame = provider.get_current()
+            coverage = live_spot_coverage(
+                security_master,
+                frame,
+                allowed_exchanges=allowed_exchanges,
+            )
+            if coverage < min_coverage:
+                raise RuntimeError(
+                    f"live snapshot coverage {coverage:.1%} below required {min_coverage:.1%}"
+                )
+            return LiveSpotResult(
+                frame=frame,
+                provider_name=provider.name,
+                screen_source=provider.screen_source,
+                coverage=coverage,
+                warnings=tuple(warnings),
+            )
+        except Exception as exc:  # noqa: BLE001 - independent provider failover boundary
+            warnings.append(f"{provider.name}: {type(exc).__name__}: {exc}")
+
+    raise RuntimeError("All live all-market spot providers failed: " + " | ".join(warnings))
 
 
 def select_liquid_candidates(
@@ -68,15 +193,9 @@ def select_liquid_candidates(
     min_amount: float = 50_000_000.0,
     min_listing_days: int = 120,
     allowed_exchanges: Collection[str] | None = None,
+    screen_source: str = "eastmoney_spot_amount",
 ) -> pd.DataFrame:
-    """Build a bounded current research universe without silently accepting ST/new listings.
-
-    The production screen requires a current all-market snapshot so the bounded history
-    workload is selected by actual traded amount. If that snapshot is unavailable, this
-    function fails closed; the outer production workflow then uses its explicit provider
-    and recent-candidate-cache fallback chain. It never substitutes symbol order or share
-    count for liquidity without labeling that degradation.
-    """
+    """Build a bounded current research universe without silently accepting ST/new listings."""
     if limit <= 0:
         raise ValueError("limit must be positive")
     if min_amount < 0:
@@ -117,7 +236,7 @@ def select_liquid_candidates(
     merged = merged[merged["amount"].ge(min_amount) & merged["last"].gt(0)].copy()
     if merged.empty:
         raise RuntimeError("Current spot snapshot produced no eligible liquid candidates")
-    merged["screen_source"] = "eastmoney_spot_amount"
+    merged["screen_source"] = screen_source
     merged = merged.sort_values(
         ["amount", "float_market_cap", "symbol"],
         ascending=[False, False, True],
