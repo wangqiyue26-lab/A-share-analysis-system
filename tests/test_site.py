@@ -16,6 +16,7 @@ def test_build_dashboard_with_selection_and_backtest(tmp_path):
         {
             "rank": [1.0, 2.0],
             "symbol": ["000001", "600000"],
+            "name": ["平安银行", "浦发银行"],
             "as_of": ["2026-09-28", "2026-09-28"],
             "composite_score": [1.2, 0.8],
             "momentum_20": [0.10, 0.05],
@@ -27,7 +28,17 @@ def test_build_dashboard_with_selection_and_backtest(tmp_path):
         }
     ).to_csv(selection / "selected.csv", index=False)
     (selection / "summary.json").write_text(
-        json.dumps({"selected_count": 2, "ranked_count": 5}), encoding="utf-8"
+        json.dumps(
+            {
+                "selected_count": 2,
+                "ranked_count": 5,
+                "history_success_count": 6,
+                "excluded_count": 1,
+                "screen_source": "bootstrap_sina_spot_amount",
+                "security_master_source": "degraded_current_universe",
+            }
+        ),
+        encoding="utf-8",
     )
 
     pd.DataFrame(
@@ -57,12 +68,16 @@ def test_build_dashboard_with_selection_and_backtest(tmp_path):
 
     assert "A股量化研究系统" in text
     assert "000001" in text
+    assert "平安银行" in text
     assert "沪深300" in text
+    assert "备用源" in text
+    assert "bootstrap_sina_spot_amount" in text
     assert "不构成个股推荐" in text
     assert (site / ".nojekyll").exists()
     metadata = json.loads((site / "site-meta.json").read_text(encoding="utf-8"))
     assert metadata["selection_rows"] == 2
     assert metadata["has_backtest"] is True
+    assert metadata["degraded_data"] is True
 
 
 def test_build_dashboard_can_render_empty_state(tmp_path):

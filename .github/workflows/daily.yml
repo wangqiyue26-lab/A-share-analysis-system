@@ -1,32 +1,190 @@
-name: Daily cloud health
+name: Daily A-share production
 
 on:
+  push:
+    branches:
+      - main
+      - "phase/4b-daily-production"
+    paths:
+      - "src/ashare_system/production.py"
+      - "src/ashare_system/bootstrap_universe.py"
+      - "src/ashare_system/data/spot.py"
+      - "src/ashare_system/data/cache.py"
+      - "src/ashare_system/factors/**"
+      - "src/ashare_system/reporting.py"
+      - "src/ashare_system/site.py"
+      - "config/**"
+      - "pyproject.toml"
+      - ".github/workflows/daily.yml"
   schedule:
-    # China Standard Time has no DST: 09:17 UTC = 17:17 Asia/Shanghai.
-    - cron: "17 9 * * 1-5"
+    - cron: "23 9 * * 1-5"
   workflow_dispatch:
 
 permissions:
   contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: true
 
 jobs:
-  health:
+  universe:
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - name: Checkout
+        uses: actions/checkout@v6
+      - name: Setup Python
+        uses: actions/setup-python@v5
         with:
           python-version: "3.11"
           cache: pip
+      - name: Restore universe caches
+        uses: actions/cache@v4
+        with:
+          path: |
+            data/cache/security_master
+            data/cache/candidate_universe
+          key: ashare-universe-${{ runner.os }}-${{ github.run_id }}
+          restore-keys: |
+            ashare-universe-${{ runner.os }}-
       - name: Install
         run: python -m pip install -e .
-      - name: Runtime health
-        run: ashare-system health --output reports/health/latest.json
-      - name: Recent A-share data smoke
-        run: ashare-system smoke-data --symbol 000001 --cache-dir data/cache
-      - name: Upload health report
+      - name: Prepare bounded SSE/SZSE candidate universe
+        shell: bash
+        run: |
+          mkdir -p reports/universe
+          set +e
+          ashare-daily \
+            --prepare-only \
+            --candidate-limit 30 \
+            --allowed-exchanges SSE,SZSE \
+            --output-root reports/universe \
+            --cache-root data/cache \
+            >reports/universe/primary_prepare.log 2>&1
+          status=$?
+          set -e
+          cat reports/universe/primary_prepare.log
+          if [ "$status" -ne 0 ]; then
+            echo "Primary liquidity screen unavailable; entering explicit cold-start fallbacks."
+            python -m ashare_system.bootstrap_universe \
+              --candidate-limit 30 \
+              --allowed-exchanges SSE,SZSE \
+              --output-root reports/universe \
+              --cache-root data/cache \
+              --reason-file reports/universe/primary_prepare.log
+          fi
+      - name: Verify candidate universe
+        run: |
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          import pandas as pd
+
+          frame = pd.read_csv("reports/universe/candidates.csv", dtype={"symbol": str})
+          manifest = json.loads(Path("reports/universe/universe_manifest.json").read_text(encoding="utf-8"))
+          assert len(frame) >= 30
+          assert set(frame["exchange"]) <= {"SSE", "SZSE"}
+          is_st = frame["is_st"].astype(str).str.lower().isin({"true", "1"})
+          assert not is_st.any()
+          sources = set(frame["screen_source"].astype(str))
+          allowed_sources = {
+              "eastmoney_spot_amount",
+              "bootstrap_eastmoney_spot_amount",
+              "bootstrap_sina_spot_amount",
+              "candidate_cache_fallback",
+              "history_liquidity_fallback",
+          }
+          assert sources <= allowed_sources
+          if "history_liquidity_fallback" in sources:
+              assert manifest["listing_age_verified"] is True
+              assert frame["amount"].notna().all()
+              assert frame["amount"].min() >= 50_000_000
+          print(frame[["symbol", "name", "exchange", "screen_source", "amount"]].head(10).to_string(index=False))
+          print(json.dumps(manifest, ensure_ascii=False, indent=2))
+          PY
+      - name: Upload candidate handoff
         uses: actions/upload-artifact@v4
         with:
-          name: phase1-health-${{ github.run_id }}
-          path: reports/health/latest.json
+          name: daily-universe-${{ github.run_id }}
+          path: reports/universe/
+          retention-days: 3
+
+  build:
+    runs-on: ubuntu-latest
+    needs: universe
+    timeout-minutes: 30
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+      - name: Download candidate handoff
+        uses: actions/download-artifact@v4
+        with:
+          name: daily-universe-${{ github.run_id }}
+          path: reports/universe
+      - name: Restore market-data cache
+        uses: actions/cache@v4
+        with:
+          path: data/cache/bars_raw
+          key: ashare-bars-raw-${{ runner.os }}-${{ github.run_id }}
+          restore-keys: |
+            ashare-bars-raw-${{ runner.os }}-
+      - name: Install
+        run: python -m pip install -e .
+      - name: Fetch candidate history and build research site
+        run: >-
+          ashare-daily
+          --candidates-file reports/universe/candidates.csv
+          --top 10
+          --history-days 420
+          --workers 2
+          --adjust ""
+          --output-root reports/production
+          --site-dir site
+          --cache-root data/cache
+      - name: Verify production outputs
+        run: |
+          python - <<'PY'
+          import json
+          from pathlib import Path
+
+          manifest = json.loads(Path("reports/production/manifest.json").read_text(encoding="utf-8"))
+          assert manifest["selected_count"] > 0
+          assert manifest["history_success_count"] >= manifest["selected_count"]
+          assert Path("reports/production/selection/selected.csv").exists()
+          assert Path("site/index.html").exists()
+          print(json.dumps(manifest, ensure_ascii=False, indent=2))
+          PY
+      - name: Upload research artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: daily-research-${{ github.run_id }}
+          path: reports/production/
           retention-days: 14
+      - name: Configure Pages
+        if: github.ref == 'refs/heads/main'
+        uses: actions/configure-pages@v5
+      - name: Upload Pages artifact
+        if: github.ref == 'refs/heads/main'
+        uses: actions/upload-pages-artifact@v4
+        with:
+          path: site
+
+  deploy:
+    if: github.ref == 'refs/heads/main'
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    runs-on: ubuntu-latest
+    needs: build
+    steps:
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4

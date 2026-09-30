@@ -11,6 +11,9 @@ import pandas as pd
 CHINA_TZ = ZoneInfo("Asia/Shanghai")
 
 _FACTOR_LABELS = {
+    "rank": "排名",
+    "symbol": "代码",
+    "name": "名称",
     "momentum_20": "20日动量",
     "momentum_60": "60日动量",
     "trend_ma20_ma60": "均线趋势",
@@ -65,6 +68,7 @@ def _selection_table(frame: pd.DataFrame, limit: int = 20) -> str:
     preferred = [
         "rank",
         "symbol",
+        "name",
         "composite_score",
         "momentum_20",
         "momentum_60",
@@ -87,6 +91,8 @@ def _selection_table(frame: pd.DataFrame, limit: int = 20) -> str:
             value = row[column]
             if column == "symbol":
                 text = html.escape(str(value).zfill(6))
+            elif column == "name":
+                text = html.escape(str(value)) if not pd.isna(value) else "—"
             elif column == "rank":
                 text = str(int(float(value))) if not pd.isna(value) else "—"
             elif column in {"momentum_20", "momentum_60", "volatility_20", "max_drawdown_60"}:
@@ -148,6 +154,17 @@ def _line_svg(frame: pd.DataFrame) -> str:
     """
 
 
+def _data_quality_status(summary: dict[str, object]) -> tuple[bool, str, str]:
+    screen_source = str(summary.get("screen_source") or "unknown")
+    master_source = str(summary.get("security_master_source") or "unknown")
+    degraded = master_source == "degraded_current_universe" or screen_source.startswith(
+        ("bootstrap_", "candidate_cache_", "history_liquidity_")
+    )
+    if degraded:
+        return True, "备用源", f"候选来源：{screen_source}；主数据状态：{master_source}"
+    return False, "正常", f"候选来源：{screen_source}"
+
+
 def build_dashboard(
     output_dir: str | Path,
     *,
@@ -185,10 +202,14 @@ def build_dashboard(
         if not parsed.empty:
             as_of = parsed.max().date().isoformat()
 
+    degraded, data_status, data_detail = _data_quality_status(selection_summary)
     cards = [
         _metric_card("入选数量", str(int(selection_summary.get("selected_count", len(selected))))),
         _metric_card("候选排名数", str(int(selection_summary.get("ranked_count", len(selected))))),
+        _metric_card("历史成功", str(int(selection_summary.get("history_success_count", len(selected))))),
+        _metric_card("排除数量", str(int(selection_summary.get("excluded_count", 0)))),
         _metric_card("数据日期", html.escape(as_of)),
+        _metric_card("数据状态", data_status, data_detail),
     ]
     if backtest_summary:
         cards.extend(
@@ -205,6 +226,10 @@ def build_dashboard(
     status_note = (
         "当前页面用于验证云端数据、因子、回测和发布链路。"
         "排名是量化研究输出，不构成个股推荐或收益承诺。"
+    )
+    quality_note = (
+        "当前候选池使用备用数据源生成；排名仍使用逐股历史行情计算，"
+        "但请把本期结果视为降级数据模式。" if degraded else "当前候选池未触发备用数据模式。"
     )
 
     page = f"""<!doctype html>
@@ -226,10 +251,10 @@ h1 {{ margin:0; font-size:clamp(26px,4vw,40px); letter-spacing:-.03em; }}
 .meta {{ margin-top:14px; font-size:12px; color:#aebfca; }}
 .metrics {{ display:grid; grid-template-columns:repeat(auto-fit,minmax(150px,1fr)); gap:12px; margin:18px 0; }}
 .metric-card,.panel {{ background:var(--panel); border:1px solid var(--line); border-radius:14px; box-shadow:0 2px 10px rgba(20,35,50,.04); }}
-.metric-card {{ padding:16px; }} .metric-label {{ color:var(--muted); font-size:12px; }} .metric-value {{ font-size:22px; font-weight:700; margin-top:6px; }} .metric-detail {{ color:var(--muted); font-size:11px; margin-top:3px; }}
+.metric-card {{ padding:16px; }} .metric-label {{ color:var(--muted); font-size:12px; }} .metric-value {{ font-size:22px; font-weight:700; margin-top:6px; }} .metric-detail {{ color:var(--muted); font-size:11px; margin-top:3px; line-height:1.4; }}
 .panel {{ padding:20px; margin-top:16px; }}
 .panel h2 {{ margin:0 0 6px; font-size:18px; }} .subtitle {{ color:var(--muted); font-size:13px; margin-bottom:15px; line-height:1.5; }}
-.table-wrap {{ overflow:auto; border:1px solid var(--line); border-radius:10px; }} table {{ width:100%; border-collapse:collapse; font-size:13px; white-space:nowrap; }} th,td {{ padding:11px 12px; border-bottom:1px solid var(--line); text-align:right; }} th {{ background:#f7f9fb; color:#4c5965; font-size:12px; position:sticky; top:0; }} th:nth-child(2),td:nth-child(2) {{ text-align:left; font-variant-numeric:tabular-nums; }} tbody tr:hover {{ background:#f8fbfd; }}
+.table-wrap {{ overflow:auto; border:1px solid var(--line); border-radius:10px; }} table {{ width:100%; border-collapse:collapse; font-size:13px; white-space:nowrap; }} th,td {{ padding:11px 12px; border-bottom:1px solid var(--line); text-align:right; }} th {{ background:#f7f9fb; color:#4c5965; font-size:12px; position:sticky; top:0; }} th:nth-child(2),td:nth-child(2),th:nth-child(3),td:nth-child(3) {{ text-align:left; font-variant-numeric:tabular-nums; }} tbody tr:hover {{ background:#f8fbfd; }}
 .chart-wrap {{ width:100%; overflow:hidden; }} svg {{ width:100%; height:auto; background:#fbfcfd; border:1px solid var(--line); border-radius:10px; }} .axis {{ stroke:#c8d1d9; stroke-width:1; }} .portfolio-line {{ fill:none; stroke:var(--accent); stroke-width:2.4; }} .benchmark-line {{ fill:none; stroke:var(--accent2); stroke-width:2; stroke-dasharray:5 4; }} .chart-label,.tick {{ fill:#52606c; font-size:12px; }} .benchmark-label {{ fill:var(--accent2); }}
 .notice {{ border-left:4px solid #d59a42; padding:12px 14px; background:#fffaf1; color:#64523b; border-radius:8px; line-height:1.55; font-size:13px; }} .empty {{ color:var(--muted); padding:20px; text-align:center; }}
 .footer {{ color:var(--muted); font-size:12px; margin-top:20px; line-height:1.6; }}
@@ -244,6 +269,7 @@ h1 {{ margin:0; font-size:clamp(26px,4vw,40px); letter-spacing:-.03em; }}
     <div class="meta">生成时间：{generated_at.strftime('%Y-%m-%d %H:%M:%S')} Asia/Shanghai</div>
   </section>
   <section class="metrics">{''.join(cards)}</section>
+  <section class="panel"><div class="notice">{html.escape(quality_note)} {html.escape(data_detail)}</div></section>
   <section class="panel">
     <h2>最新量化排名</h2>
     <div class="subtitle">当前综合分由动量、趋势、波动、回撤和成交额等市场因子组成；后续阶段再接入经过 Point-in-Time 校验的基本面因子。</div>
@@ -269,6 +295,9 @@ h1 {{ margin:0; font-size:clamp(26px,4vw,40px); letter-spacing:-.03em; }}
         "mode": mode_label,
         "selection_rows": len(selected),
         "has_backtest": bool(backtest_summary),
+        "degraded_data": degraded,
+        "screen_source": selection_summary.get("screen_source"),
+        "security_master_source": selection_summary.get("security_master_source"),
     }
     (output / "site-meta.json").write_text(
         json.dumps(metadata, ensure_ascii=False, indent=2) + "\n",

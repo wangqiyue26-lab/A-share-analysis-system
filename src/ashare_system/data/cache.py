@@ -28,3 +28,15 @@ class ParquetBarCache:
         if not path.exists():
             raise FileNotFoundError(path)
         return validate_bars(pd.read_parquet(path))
+
+    def upsert(self, symbol: str, frame: pd.DataFrame) -> Path:
+        """Merge new normalized bars into a symbol cache, keeping the latest duplicate date."""
+        incoming = validate_bars(frame)
+        try:
+            current = self.load(symbol)
+        except FileNotFoundError:
+            return self.save(symbol, incoming)
+        combined = pd.concat([current, incoming], ignore_index=True)
+        combined["trade_date"] = pd.to_datetime(combined["trade_date"])
+        combined = combined.sort_values("trade_date").drop_duplicates("trade_date", keep="last")
+        return self.save(symbol, combined)
