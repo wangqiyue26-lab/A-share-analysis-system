@@ -5,28 +5,41 @@
 ## Roadmap
 
 - ✅ **Phase 1 — Foundation**：多端点数据接口、统一数据格式、缓存、配置、日志、CI、云端 smoke test。
-- 🚧 **Phase 2 — Factor Engine**：股票池、市场/技术因子、基本面/估值/质量/成长因子、标准化与综合评分。
-- **Phase 3 — China Backtest**：T+1、涨跌停、停牌、ST/退市、费用/滑点、历史股票池、Point-in-Time 财务数据。
-- **Phase 4 — Dashboard**：每日选股、个股解释、组合/风险/回测页面，部署 GitHub Pages。
+- ✅ **Phase 2A — Market Factor Engine**：股票池、市场/技术因子、标准化、综合评分与可解释排名。
+- ✅ **Phase 3 — China Backtest Foundation**：T+1、涨跌停、停牌、ST/退市、费用/滑点、历史股票池、Point-in-Time 基础设施与沪深300基准报告。
+- ✅ **Phase 4B — Cloud Daily Production**：真实 A 股候选池、自动降级、每日历史更新、Top10、研究产物、静态 Dashboard、GitHub Pages 发布链。
+- ⏭️ **Next — Point-in-Time Fundamentals & Strict Rolling Research**：接入公告时间约束的基本面/估值/质量/成长因子，并在积累足够历史 security-master 快照后加入严格滚动组合回测。
 - **Phase 5 — ML Lab**：Qlib/LightGBM、Walk-forward、特征重要性、模型集成。
 
 ## Current architecture
 
 ```text
-AKShare Eastmoney ─┐
+Exchange security master ──────────────────────────────────────────────┐
+                                                                      │
+Eastmoney all-A spot ─┐                                               │
+Sina all-A spot ──────┼─ bounded universe + explicit fallback state ──┤
+recent candidate cache┤                                               │
+recent history amount ┘                                               ↓
+                                                             candidate artifact
+                                                                      ↓
+AKShare Eastmoney ─┐                                                  │
                    ├─ DataRouter ─ canonical bar schema ─ Parquet cache
 AKShare Sina ──────┘                                      │
                                                           ↓
-                                                universe eligibility
+                                                history eligibility
                                                           ↓
                                                 interpretable factors
                                                           ↓
                                              winsorize + cross-section z-score
                                                           ↓
-                                               weighted score + ranking
+                                               weighted score + Top10
+                                                          ↓
+                                                static research dashboard
+                                                          ↓
+                                                   GitHub Pages
 ```
 
-## Phase 2A factors
+## Current market factors
 
 The first factor layer is deliberately explainable and uses only information observable from daily market data:
 
@@ -39,7 +52,17 @@ The first factor layer is deliberately explainable and uses only information obs
 
 Raw values and per-factor standardized scores are both retained. Factor weights and directions live in `config/factors.yml`.
 
-Financial statement factors are intentionally deferred to Phase 2B so that announcement/availability timestamps can be designed correctly instead of introducing look-ahead bias.
+Financial-statement factors remain intentionally separate from the daily market-factor layer until announcement/availability timestamps are enforced end to end. That avoids look-ahead bias.
+
+## Cloud production behavior
+
+The scheduled pipeline runs after the China A-share close on GitHub-hosted runners. It currently uses a bounded 30-name SSE/SZSE candidate pool and selects the Top10 research ranking. This is an endpoint-stability starting point, not a claim that 30 names are sufficient for final research.
+
+Market-wide public endpoints can be unstable from cloud IPs. The universe stage therefore records an explicit source and can degrade through Eastmoney spot, Sina spot, a recent candidate cache, and finally a bounded history-liquidity path based on actual traded amount. Degraded current-universe data is never written as a canonical historical security-master snapshot.
+
+The dashboard visibly marks fallback runs as **备用源** and shows the source, so degraded data cannot silently appear as a normal primary-data run.
+
+See `docs/production_pipeline.md` for the detailed production and storage rules.
 
 ## Quick start
 
@@ -56,12 +79,13 @@ The network smoke test intentionally checks real public A-share data interfaces.
 
 ## Cloud automation
 
-- `.github/workflows/ci.yml`: lint, unit tests, CLI health and a non-blocking public-data network smoke test.
-- `.github/workflows/daily.yml`: weekday cloud health/data check after the A-share close.
+- `.github/workflows/ci.yml`: lint, unit tests, CLI health and public-data smoke checks.
+- `.github/workflows/daily.yml`: scheduled production universe, history/factor run, research artifact and main-branch Pages deployment.
+- `.github/workflows/pages.yml`: manual sample-dashboard preview; it queues behind production and does not cancel a production Pages run.
 
 ## Data policy
 
-Large historical datasets are **not committed to Git**. Local/cloud cache files live under `data/cache/` and are ignored. Cache is rebuildable acceleration, never the only copy of source data.
+Large historical datasets are **not committed to Git**. Rebuildable market/security-master caches live in GitHub Actions cache or `data/cache/` locally. Candidate handoffs and daily research outputs are short-lived workflow artifacts. GitHub Pages receives the generated static site; daily market data is not committed into repository history.
 
 ## Disclaimer
 
