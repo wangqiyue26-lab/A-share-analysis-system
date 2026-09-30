@@ -73,7 +73,7 @@ def capture_signal(
     signal with different constituents, scores or weights.
     """
     selected = pd.read_csv(selected_file, dtype={"symbol": str})
-    observed = observed_at or pd.Timestamp.now(tz="UTC")
+    observed = observed_at if observed_at is not None else pd.Timestamp.now(tz="UTC")
     if observed.tzinfo is None:
         observed = observed.tz_localize("UTC")
     else:
@@ -88,13 +88,22 @@ def capture_signal(
         compare_columns = [column for column in signal.columns if column != "observed_at"]
         existing_compare = existing.loc[:, compare_columns].copy()
         candidate_compare = signal.loc[:, compare_columns].copy()
-        existing_compare["signal_date"] = pd.to_datetime(existing_compare["signal_date"]).dt.strftime("%Y-%m-%d")
-        candidate_compare["signal_date"] = pd.to_datetime(candidate_compare["signal_date"]).dt.strftime("%Y-%m-%d")
-        if not existing_compare.reset_index(drop=True).equals(candidate_compare.reset_index(drop=True)):
+        existing_compare["signal_date"] = pd.to_datetime(existing_compare["signal_date"])
+        candidate_compare["signal_date"] = pd.to_datetime(candidate_compare["signal_date"])
+        try:
+            pd.testing.assert_frame_equal(
+                existing_compare.reset_index(drop=True),
+                candidate_compare.reset_index(drop=True),
+                check_dtype=False,
+                check_exact=False,
+                rtol=1e-12,
+                atol=1e-12,
+            )
+        except AssertionError as exc:
             raise RuntimeError(
                 f"Refusing to rewrite immutable shadow signal for {signal_date}; "
                 "the newly generated selection differs from the first observation"
-            )
+            ) from exc
         return output
 
     signal.to_csv(output, index=False, date_format="%Y-%m-%d")
@@ -126,7 +135,7 @@ def _fetch_shadow_bars(
     warnings: list[dict[str, str]] = []
 
     with ThreadPoolExecutor(max_workers=min(workers, len(symbols))) as pool:
-        futures = {
+        futures = [
             pool.submit(
                 _fetch_one_history,
                 symbol,
@@ -134,11 +143,10 @@ def _fetch_shadow_bars(
                 end=market_as_of,
                 cache_root=cache_root,
                 adjust="",
-            ): symbol
+            )
             for symbol in symbols
-        }
+        ]
         for future in as_completed(futures):
-            symbol = futures[future]
             returned, frame, provider, warning = future.result()
             if frame is None:
                 raise RuntimeError(f"Missing shadow history for {returned}: {warning}")
@@ -150,7 +158,9 @@ def _fetch_shadow_bars(
                 raise RuntimeError(f"No shadow bars in evaluation window for {returned}")
             bars_by_symbol[returned] = trimmed
             if warning:
-                warnings.append({"symbol": returned, "provider": provider or "unknown", "warning": warning})
+                warnings.append(
+                    {"symbol": returned, "provider": provider or "unknown", "warning": warning}
+                )
 
     missing = sorted(set(symbols) - set(bars_by_symbol))
     if missing:
@@ -170,7 +180,11 @@ def evaluate_signals(
     result = BacktestEngine(initial_cash=initial_cash).run(bars_by_symbol, engine_signals)
     equity = result.equity_curve.copy()
     trades = result.trades.copy()
-    daily_returns = equity["equity"].pct_change().dropna() if len(equity) > 1 else pd.Series(dtype=float)
+    daily_returns = (
+        equity["equity"].pct_change().dropna()
+        if len(equity) > 1
+        else pd.Series(dtype=float)
+    )
     metrics: dict[str, object] = dict(result.metrics)
     metrics.update(
         {
@@ -300,7 +314,7 @@ def run_shadow_pipeline(
         trades.to_csv(output / "trades.csv", index=False, date_format="%Y-%m-%d")
         metrics["history_warnings"] = warnings
         metrics["status"] = "ok"
-    except Exception as exc:  # noqa: BLE001 - preserve today's immutable signal even if evaluation is degraded
+    except Exception as exc:  # noqa: BLE001 - preserve today's immutable signal if evaluation degrades
         evaluation_error = f"{type(exc).__name__}: {exc}"
         metrics = {
             "status": "degraded",
