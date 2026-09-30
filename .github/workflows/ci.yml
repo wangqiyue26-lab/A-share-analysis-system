@@ -46,6 +46,37 @@ jobs:
       - name: Multi-endpoint A-share network smoke test
         timeout-minutes: 5
         run: ashare-system smoke-data --symbol 000001 --start 20240102 --end 20240110 --adjust ""
+      - name: Independent all-market live spot smoke test
+        timeout-minutes: 5
+        run: |
+          python - <<'PY'
+          import json
+
+          from ashare_system.data.spot import AkshareEastmoneySpotProvider, AkshareSinaSpotProvider
+
+          providers = (AkshareSinaSpotProvider(), AkshareEastmoneySpotProvider())
+          errors = []
+          for provider in providers:
+              try:
+                  frame = provider.get_current()
+                  positive_amount = int(frame["amount"].gt(0).sum())
+                  if len(frame) < 3000 or positive_amount < 2500:
+                      raise RuntimeError(
+                          f"insufficient live rows={len(frame)}, positive_amount_rows={positive_amount}"
+                      )
+                  print(json.dumps({
+                      "provider": provider.name,
+                      "rows": len(frame),
+                      "positive_amount_rows": positive_amount,
+                  }, ensure_ascii=False, indent=2))
+                  break
+              except Exception as exc:
+                  errors.append(f"{provider.name}: {type(exc).__name__}: {exc}")
+          else:
+              raise RuntimeError("all live spot providers failed: " + " | ".join(errors))
+          if errors:
+              print(json.dumps({"earlier_provider_warnings": errors}, ensure_ascii=False, indent=2))
+          PY
       - name: Exchange security-master smoke test
         timeout-minutes: 5
         continue-on-error: true
