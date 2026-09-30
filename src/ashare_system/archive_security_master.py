@@ -9,7 +9,11 @@ from pathlib import Path
 
 import pandas as pd
 
-from .data.security_master import REQUIRED_EXCHANGES, SecurityMasterSnapshotStore, validate_security_master
+from .data.security_master import (
+    REQUIRED_EXCHANGES,
+    SecurityMasterSnapshotStore,
+    validate_security_master,
+)
 
 
 @dataclass(frozen=True)
