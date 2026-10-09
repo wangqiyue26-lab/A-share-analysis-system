@@ -1,0 +1,11 @@
+signal_date,symbol,name,board,is_st,rank,composite_score,target_weight,screen_source,strategy_version,observed_at
+2026-10-09,603259,药明康德,上证主板,False,1,1.317456408246011,0.1,sina_spot_amount,market-factors-v1,2026-10-09T16:27:06.470523+00:00
+2026-10-09,601899,紫金矿业,上证主板,False,2,0.8694232590532358,0.1,sina_spot_amount,market-factors-v1,2026-10-09T16:27:06.470523+00:00
+2026-10-09,300450,先导智能,创业板,False,3,0.7178881017246957,0.1,sina_spot_amount,market-factors-v1,2026-10-09T16:27:06.470523+00:00
+2026-10-09,300408,三环集团,创业板,False,4,0.5337475063769119,0.1,sina_spot_amount,market-factors-v1,2026-10-09T16:27:06.470523+00:00
+2026-10-09,002436,兴森科技,主板,False,5,0.4855538664036598,0.1,sina_spot_amount,market-factors-v1,2026-10-09T16:27:06.470523+00:00
+2026-10-09,002463,沪电股份,主板,False,6,0.3120692581202937,0.1,sina_spot_amount,market-factors-v1,2026-10-09T16:27:06.470523+00:00
+2026-10-09,002487,大金重工,主板,False,7,0.2719216211940002,0.1,sina_spot_amount,market-factors-v1,2026-10-09T16:27:06.470523+00:00
+2026-10-09,600418,江淮汽车,上证主板,False,8,0.2295258765454701,0.1,sina_spot_amount,market-factors-v1,2026-10-09T16:27:06.470523+00:00
+2026-10-09,300394,天孚通信,创业板,False,9,0.2095469866983521,0.1,sina_spot_amount,market-factors-v1,2026-10-09T16:27:06.470523+00:00
+2026-10-09,600183,生益科技,上证主板,False,10,0.1793906177553884,0.1,sina_spot_amount,market-factors-v1,2026-10-09T16:27:06.470523+00:00
