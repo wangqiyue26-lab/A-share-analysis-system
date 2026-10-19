@@ -1,0 +1,11 @@
+signal_date,symbol,name,board,is_st,rank,composite_score,target_weight,screen_source,strategy_version,observed_at
+2026-10-19,600825,新华传媒,上证主板,False,1,1.2964341261791552,0.1,sina_spot_amount,market-factors-v1,2026-10-19T16:36:22.287071+00:00
+2026-10-19,000823,超声电子,主板,False,2,0.9597212707291582,0.1,sina_spot_amount,market-factors-v1,2026-10-19T16:36:22.287071+00:00
+2026-10-19,002815,崇达技术,主板,False,3,0.9562923162741342,0.1,sina_spot_amount,market-factors-v1,2026-10-19T16:36:22.287071+00:00
+2026-10-19,603259,药明康德,上证主板,False,4,0.8392531985001872,0.1,sina_spot_amount,market-factors-v1,2026-10-19T16:36:22.287071+00:00
+2026-10-19,600519,贵州茅台,上证主板,False,5,0.6564408142290397,0.1,sina_spot_amount,market-factors-v1,2026-10-19T16:36:22.287071+00:00
+2026-10-19,601899,紫金矿业,上证主板,False,6,0.4645101753395663,0.1,sina_spot_amount,market-factors-v1,2026-10-19T16:36:22.287071+00:00
+2026-10-19,002463,沪电股份,主板,False,7,0.2918649646198587,0.1,sina_spot_amount,market-factors-v1,2026-10-19T16:36:22.287071+00:00
+2026-10-19,600183,生益科技,上证主板,False,8,0.1933247611070314,0.1,sina_spot_amount,market-factors-v1,2026-10-19T16:36:22.287071+00:00
+2026-10-19,688256,寒武纪,科创板,False,9,0.106131339104625,0.1,sina_spot_amount,market-factors-v1,2026-10-19T16:36:22.287071+00:00
+2026-10-19,600418,江淮汽车,上证主板,False,10,0.0903968651388882,0.1,sina_spot_amount,market-factors-v1,2026-10-19T16:36:22.287071+00:00
