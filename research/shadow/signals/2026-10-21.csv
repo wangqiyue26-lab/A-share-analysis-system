@@ -1,0 +1,11 @@
+signal_date,symbol,name,board,is_st,rank,composite_score,target_weight,screen_source,strategy_version,observed_at
+2026-10-21,603259,药明康德,上证主板,False,1,1.2171692083076642,0.1,sina_spot_amount,market-factors-v1,2026-10-21T14:37:13.943327+00:00
+2026-10-21,600519,贵州茅台,上证主板,False,2,1.0759652483400968,0.1,sina_spot_amount,market-factors-v1,2026-10-21T14:37:13.943327+00:00
+2026-10-21,603236,移远通信,上证主板,False,3,0.9352621130315606,0.1,sina_spot_amount,market-factors-v1,2026-10-21T14:37:13.943327+00:00
+2026-10-21,002463,沪电股份,主板,False,4,0.7262020533655926,0.1,sina_spot_amount,market-factors-v1,2026-10-21T14:37:13.943327+00:00
+2026-10-21,000651,格力电器,主板,False,5,0.6222917543296965,0.1,sina_spot_amount,market-factors-v1,2026-10-21T14:37:13.943327+00:00
+2026-10-21,601899,紫金矿业,上证主板,False,6,0.6129735457331996,0.1,sina_spot_amount,market-factors-v1,2026-10-21T14:37:13.943327+00:00
+2026-10-21,002428,云南锗业,主板,False,7,0.522954864153722,0.1,sina_spot_amount,market-factors-v1,2026-10-21T14:37:13.943327+00:00
+2026-10-21,600183,生益科技,上证主板,False,8,0.3561356752890936,0.1,sina_spot_amount,market-factors-v1,2026-10-21T14:37:13.943327+00:00
+2026-10-21,603083,剑桥科技,上证主板,False,9,0.25051907642545,0.1,sina_spot_amount,market-factors-v1,2026-10-21T14:37:13.943327+00:00
+2026-10-21,300394,天孚通信,创业板,False,10,0.242052069746696,0.1,sina_spot_amount,market-factors-v1,2026-10-21T14:37:13.943327+00:00
