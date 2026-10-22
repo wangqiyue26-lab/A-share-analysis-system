@@ -1,0 +1,11 @@
+signal_date,symbol,name,board,is_st,rank,composite_score,target_weight,screen_source,strategy_version,observed_at
+2026-10-22,600036,招商银行,上证主板,False,1,1.2955187416297733,0.1,sina_spot_amount,market-factors-v1,2026-10-22T14:39:26.514791+00:00
+2026-10-22,600900,长江电力,上证主板,False,2,1.2462227842730615,0.1,sina_spot_amount,market-factors-v1,2026-10-22T14:39:26.514791+00:00
+2026-10-22,600519,贵州茅台,上证主板,False,3,1.2160735992340594,0.1,sina_spot_amount,market-factors-v1,2026-10-22T14:39:26.514791+00:00
+2026-10-22,603259,药明康德,上证主板,False,4,1.0593802543235722,0.1,sina_spot_amount,market-factors-v1,2026-10-22T14:39:26.514791+00:00
+2026-10-22,601318,中国平安,上证主板,False,5,0.8632185556430054,0.1,sina_spot_amount,market-factors-v1,2026-10-22T14:39:26.514791+00:00
+2026-10-22,002463,沪电股份,主板,False,6,0.5878572991074851,0.1,sina_spot_amount,market-factors-v1,2026-10-22T14:39:26.514791+00:00
+2026-10-22,000725,京东方Ａ,主板,False,7,0.4441090525714442,0.1,sina_spot_amount,market-factors-v1,2026-10-22T14:39:26.514791+00:00
+2026-10-22,601899,紫金矿业,上证主板,False,8,0.37165447182107897,0.1,sina_spot_amount,market-factors-v1,2026-10-22T14:39:26.514791+00:00
+2026-10-22,002428,云南锗业,主板,False,9,0.3060351667487303,0.1,sina_spot_amount,market-factors-v1,2026-10-22T14:39:26.514791+00:00
+2026-10-22,600183,生益科技,上证主板,False,10,0.21042650302411,0.1,sina_spot_amount,market-factors-v1,2026-10-22T14:39:26.514791+00:00
