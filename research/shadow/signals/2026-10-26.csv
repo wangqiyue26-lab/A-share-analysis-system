@@ -1,0 +1,11 @@
+signal_date,symbol,name,board,is_st,rank,composite_score,target_weight,screen_source,strategy_version,observed_at
+2026-10-26,600519,贵州茅台,上证主板,False,1,1.2482187658627755,0.1,sina_spot_amount,market-factors-v1,2026-10-26T16:17:15.092460+00:00
+2026-10-26,601398,工商银行,上证主板,False,2,1.2375476451000458,0.1,sina_spot_amount,market-factors-v1,2026-10-26T16:17:15.092460+00:00
+2026-10-26,603259,药明康德,上证主板,False,3,1.1099842336980805,0.1,sina_spot_amount,market-factors-v1,2026-10-26T16:17:15.092460+00:00
+2026-10-26,002354,天娱数科,主板,False,4,0.7810615504651797,0.1,sina_spot_amount,market-factors-v1,2026-10-26T16:17:15.092460+00:00
+2026-10-26,002241,歌尔股份,主板,False,5,0.5398861196040703,0.1,sina_spot_amount,market-factors-v1,2026-10-26T16:17:15.092460+00:00
+2026-10-26,300296,利亚德,创业板,False,6,0.4654525520735844,0.1,sina_spot_amount,market-factors-v1,2026-10-26T16:17:15.092460+00:00
+2026-10-26,601899,紫金矿业,上证主板,False,7,0.4149605718048559,0.1,sina_spot_amount,market-factors-v1,2026-10-26T16:17:15.092460+00:00
+2026-10-26,002463,沪电股份,主板,False,8,0.3734459769950023,0.1,sina_spot_amount,market-factors-v1,2026-10-26T16:17:15.092460+00:00
+2026-10-26,688256,寒武纪,科创板,False,9,0.30945227711153345,0.1,sina_spot_amount,market-factors-v1,2026-10-26T16:17:15.092460+00:00
+2026-10-26,002475,立讯精密,主板,False,10,0.18730934965019008,0.1,sina_spot_amount,market-factors-v1,2026-10-26T16:17:15.092460+00:00
