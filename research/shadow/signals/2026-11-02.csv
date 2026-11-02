@@ -1,0 +1,11 @@
+signal_date,symbol,name,board,is_st,rank,composite_score,target_weight,screen_source,strategy_version,observed_at
+2026-11-02,600519,贵州茅台,上证主板,False,1,1.2937546845290928,0.1,sina_spot_amount,market-factors-v1,2026-11-02T19:41:06.314916+00:00
+2026-11-02,600036,招商银行,上证主板,False,2,1.285037357829191,0.1,sina_spot_amount,market-factors-v1,2026-11-02T19:41:06.314916+00:00
+2026-11-02,601398,工商银行,上证主板,False,3,1.2191542693077966,0.1,sina_spot_amount,market-factors-v1,2026-11-02T19:41:06.314916+00:00
+2026-11-02,600900,长江电力,上证主板,False,4,1.1308451998530193,0.1,sina_spot_amount,market-factors-v1,2026-11-02T19:41:06.314916+00:00
+2026-11-02,601318,中国平安,上证主板,False,5,0.8987377976058708,0.1,sina_spot_amount,market-factors-v1,2026-11-02T19:41:06.314916+00:00
+2026-11-02,603259,药明康德,上证主板,False,6,0.8503898153856088,0.1,sina_spot_amount,market-factors-v1,2026-11-02T19:41:06.314916+00:00
+2026-11-02,300059,东方财富,创业板,False,7,0.7072902171363151,0.1,sina_spot_amount,market-factors-v1,2026-11-02T19:41:06.314916+00:00
+2026-11-02,600030,中信证券,上证主板,False,8,0.574892832435248,0.1,sina_spot_amount,market-factors-v1,2026-11-02T19:41:06.314916+00:00
+2026-11-02,601899,紫金矿业,上证主板,False,9,0.3306739592159478,0.1,sina_spot_amount,market-factors-v1,2026-11-02T19:41:06.314916+00:00
+2026-11-02,300033,同花顺,创业板,False,10,0.25225846778379046,0.1,sina_spot_amount,market-factors-v1,2026-11-02T19:41:06.314916+00:00
