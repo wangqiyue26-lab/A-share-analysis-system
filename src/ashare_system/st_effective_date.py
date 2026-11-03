@@ -28,6 +28,15 @@ _EFFECTIVE_DATE = re.compile(
     r"(?:(?P<year>20\d{2})年)?(?P<month>\d{1,2})月(?P<day>\d{1,2})日"
     r"(?:开市|开盘|交易)?起"
 )
+_START_DATE = re.compile(
+    r"(?:撤销|实施)?(?:其他|退市)?风险警示(?:的)?(?:起始日|实施日)"
+    r"(?:为|[:：])"
+    r"(?:(?P<year>20\d{2})年)?(?P<month>\d{1,2})月(?P<day>\d{1,2})日"
+)
+_GENERIC_START_DATE = re.compile(
+    r"(?:撤销|实施)?(?:起始日|实施日)(?:为|[:：])"
+    r"(?:(?P<year>20\d{2})年)?(?P<month>\d{1,2})月(?P<day>\d{1,2})日"
+)
 _RISK_WORD = re.compile(r"风险警示")
 _APPLY_WORD = re.compile(r"(?:实施|被实施)")
 _REMOVE_WORD = re.compile(r"撤销")
@@ -127,15 +136,21 @@ def parse_effective_st_event(
         return "no_boolean_name_transition", None
 
     dates: list[tuple[int, int, pd.Timestamp]] = []
-    for match in _EFFECTIVE_DATE.finditer(normalized):
-        value = _resolve_effective_date(
-            year_text=match.group("year"),
-            month=int(match.group("month")),
-            day=int(match.group("day")),
-            announcement_time=timestamp,
-        )
-        if value is not None:
-            dates.append((match.start(), match.end(), value))
+    seen_date_spans: set[tuple[int, int]] = set()
+    for pattern in (_EFFECTIVE_DATE, _START_DATE, _GENERIC_START_DATE):
+        for match in pattern.finditer(normalized):
+            span = match.span()
+            if span in seen_date_spans:
+                continue
+            seen_date_spans.add(span)
+            value = _resolve_effective_date(
+                year_text=match.group("year"),
+                month=int(match.group("month")),
+                day=int(match.group("day")),
+                announcement_time=timestamp,
+            )
+            if value is not None:
+                dates.append((match.start(), match.end(), value))
     if not dates:
         return "no_explicit_effective_date", None
 
