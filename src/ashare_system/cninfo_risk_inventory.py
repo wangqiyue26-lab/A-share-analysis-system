@@ -226,7 +226,7 @@ def run_inventory(
             "url=disclosure/list/search"
         ),
         "calls_attempted": fetched.calls,
-        "announcement_rows": int(len(frame)),
+        "announcement_rows": len(frame),
         "event_candidate_counts": {str(k): int(v) for k, v in counts.items()},
         "exchange_guess_counts": exchange_guess,
         "warnings": list(fetched.warnings),
