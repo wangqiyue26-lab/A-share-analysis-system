@@ -121,7 +121,7 @@ def run_experiment(
     end: str,
     output_dir: str | Path = "reports/v2-validation",
     cache_root: str | Path = "data/cache",
-    factor_config: str | Path = "config/factors.yml",
+    factor_config: str | Path = "config/factors_v2.yml",
     portfolio_config: str | Path = "config/portfolio_v2.yml",
     workers: int = 4,
     block_days: int = 20,
@@ -245,7 +245,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--end", required=True)
     parser.add_argument("--output-dir", default="reports/v2-validation")
     parser.add_argument("--cache-root", default="data/cache")
-    parser.add_argument("--factor-config", default="config/factors.yml")
+    parser.add_argument("--factor-config", default="config/factors_v2.yml")
     parser.add_argument("--portfolio-config", default="config/portfolio_v2.yml")
     parser.add_argument("--workers", type=int, default=4)
     parser.add_argument("--block-days", type=int, default=20)
