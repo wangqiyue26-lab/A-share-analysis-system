@@ -61,6 +61,7 @@ def compute_market_factors(frame: pd.DataFrame) -> dict[str, object]:
     return {
         "symbol": str(bars.iloc[-1]["symbol"]).zfill(6),
         "as_of": bars.iloc[-1]["trade_date"],
+        "close": float(close.iloc[-1]),
         "average_amount_20": float(average_amount_20),
         **values,
     }
