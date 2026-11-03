@@ -139,3 +139,22 @@ def test_exact_amount_tie_is_explicitly_a_reconstruction_difference():
     assert selected.iloc[0]["symbol"] == "000001"
     assert audit["cutoff_amount_tie_count"] == 2
     assert "float_market_cap" in audit["production_sort_difference"]
+
+
+def test_suspended_state_may_have_missing_close_but_tradable_state_may_not():
+    suspended = pd.DataFrame(
+        {
+            "symbol": ["600000"],
+            "trade_date": ["2024-05-09"],
+            "is_st": [False],
+            "trade_status": [False],
+            "close": [None],
+        }
+    )
+    normalized = normalize_states(suspended)
+    assert pd.isna(normalized.iloc[0]["close"])
+
+    tradable = suspended.copy()
+    tradable["trade_status"] = True
+    with pytest.raises(ValueError, match="tradable rows without a positive close"):
+        normalize_states(tradable)
