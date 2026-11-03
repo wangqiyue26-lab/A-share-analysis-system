@@ -18,7 +18,7 @@
 </div>
 
 > [!IMPORTANT]
-> 这个项目目前是**量化研究与影子实盘验证系统**，不是一个已经通过长期实盘检验的“自动荐股程序”。v2 已完成开发回测与 Phase 4J 稳健性初筛；当前进入 **Phase 4K：永久 Point-in-Time 股票池证据 + 严格 fail-closed walk-forward + current-universe 偏差对照**。2万元前瞻影子盘继续独立运行，`real_money_ready` 仍固定为 `false`。
+> 这个项目目前是**量化研究与影子实盘验证系统**，不是一个已经通过长期实盘检验的“自动荐股程序”。v2 已完成开发回测与 Phase 4J 稳健性初筛；Phase 4K 正在向前积累永久 PIT 证据，同时 **Phase 4K-2 开始用交易所历史记录与巨潮公告重建 2023–2026 的历史股票生命周期/风险警示证据**。历史重建与真实 contemporaneous PIT 严格分级，`real_money_ready` 仍固定为 `false`。
 
 ---
 
@@ -77,6 +77,7 @@
 | 2万元资本约束影子实盘 v2 | 🟡 | 周频调仓、最多3只个股、ETF/现金袖套、真实佣金 |
 | 20交易日滚动开发回测 | 🟡 | 多历史窗口快速筛错；不替代严格 PIT 验证 |
 | 严格 PIT walk-forward | 🟡 | 缺一天就 fail closed；满21个连续交易日后形成首个20日收益块 |
+| 历史 PIT 重建 4K-2 | 🟡 | 官方上市/退市 + 深市简称变化 + 巨潮风险警示公告证据清单 |
 | 小资金实盘门槛 | 🔒 | 尚未开放 |
 | ML / Qlib / LightGBM | ⏳ | 后续阶段，不急于提前引入 |
 
@@ -96,6 +97,7 @@ v2 2万元影子实盘        ███░░░░░░░  🟡 新一轮前�
 20日历史开发回测         ██████░░░░  🟡 自动化框架已建立
 永久 PIT 证据账本       ███░░░░░░░  🟡 开始向前积累
 严格 PIT walk-forward   ██░░░░░░░░  🟡 等待连续证据窗口
+历史 PIT 重建 4K-2      ███░░░░░░░  🟡 生命周期/公告证据盘点
 真实资金准备度          ░░░░░░░░░░  🔒 false
 ```
 
@@ -353,6 +355,7 @@ research/shadow_v2/rankings/YYYY-MM-DD.csv
 | `.github/workflows/v2-validation.yml` | 历史多窗口 20 交易日开发回测与版本淘汰 |
 | `.github/workflows/v2-robustness.yml` | v2 滑点压力、时间外与收益集中度测试 |
 | `.github/workflows/strict-pit-v2.yml` | 永久 PIT 账本驱动的 fail-closed 严格 walk-forward |
+| `.github/workflows/historical-pit-reconstruction.yml` | 交易所生命周期 + 巨潮风险警示历史证据盘点 |
 | `.github/workflows/pages.yml` | 手工预览 / Pages 辅助任务 |
 
 普通代码 `push` 可以验证生产链，但**不会写入正式影子交易信号**。只有主分支的定时/手工正式运行才允许锁定模拟交易证据，避免开发行为污染前瞻样本。
@@ -432,7 +435,8 @@ A-share-analysis-system/
 ├── reports/                  # 运行时研究产物
 ├── research/shadow/signals/  # 冻结的 v1 前瞻证据
 ├── research/shadow_v2/       # v2 2万元前瞻排名证据
-├── research/pit/             # 永久 PIT universe 证据账本
+├── research/pit/             # 永久 contemporaneous PIT universe 证据账本
+├── research/historical_pit/  # 事后历史重建研究，与 strict live ledger 隔离
 ├── src/ashare_system/
 │   ├── backtest/             # A 股交易规则、成本、回测引擎、绩效指标
 │   ├── data/                 # 行情、财务、Security Master、PIT、缓存、路由
@@ -447,6 +451,8 @@ A-share-analysis-system/
 │   ├── pit_evidence.py       # 不可回改 PIT 候选池 / 主档证据
 │   ├── strict_pit_v2.py      # fail-closed 严格 PIT walk-forward
 │   ├── pit_bias_report.py    # current-universe vs strict PIT 偏差对照
+│   ├── historical_pit_reconstruction.py # 官方上市/退市与深市简称变化重建
+│   ├── cninfo_risk_inventory.py # 历史风险警示公告候选事件清单
 │   ├── enrich_daily.py       # PIT 基本面增强
 │   ├── reporting.py          # 研究输出
 │   └── site.py               # 静态 Dashboard
@@ -510,7 +516,8 @@ ashare-system smoke-data \
 | Phase 4I — Capital-aware Validation | 🟡 | 2万元、60只候选池、少持仓、ETF/现金、真实费用、20日滚动开发回测 |
 | Phase 4J — Robustness Suite | ✅ | v2 通过滑点压力与2023–2024时间外初筛，但仍存在 current-universe bias |
 | Phase 4K — Strict PIT Validation | 🟡 | 永久候选池证据、主档状态去重、缺口 fail closed、同期 bias comparison |
-| Strict Rolling Validation | 🟡 | 首个完整严格20日窗口需等待连续 PIT 证据积累 |
+| Phase 4K-2 — Historical PIT Reconstruction | 🟡 | 2023–2026 生命周期/风险警示证据重建；尚不冒充 strict PIT |
+| Strict Rolling Validation | 🟡 | 严格 live 窗口继续积累；历史重建需先补齐 ST 与横截面成交额 |
 | Portfolio Risk Layer | ⏳ | 仓位、集中度、现金比例、组合回撤与暂停机制 |
 | Real-money Readiness Gate | 🔒 | 达到硬性门槛后才考虑小资金真实测试 |
 | Phase 5 — ML Lab | ⏳ | Qlib / LightGBM / Walk-forward / 模型集成 |
@@ -604,6 +611,7 @@ Phase 4K 从永久 `research/pit/` 账本读取当天实际候选集；如果基
 - [`docs/phase4i_capital_aware_validation.md`](./docs/phase4i_capital_aware_validation.md) — 2万元 v2 与20日快速验证协议
 - [`docs/phase4j_v2_robustness.md`](./docs/phase4j_v2_robustness.md) — v2 滑点压力、时间外与收益集中度检验
 - [`docs/phase4k_strict_pit.md`](./docs/phase4k_strict_pit.md) — 永久 PIT 证据、fail-closed 严格回测与偏差对照
+- [`docs/phase4k2_historical_reconstruction.md`](./docs/phase4k2_historical_reconstruction.md) — 历史 PIT 重建证据等级、官方数据源与升级门槛
 - [`THIRD_PARTY_NOTICES.md`](./THIRD_PARTY_NOTICES.md) — 第三方组件说明
 
 ---
