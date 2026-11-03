@@ -28,6 +28,9 @@ portfolio:
   rebalance_every_trading_days: 5
   minimum_holding_trading_days: 5
   affordability_buffer_rate: 0.002
+  require_positive_momentum_20_for_entry: true
+  require_close_above_ma20_for_entry: true
+  require_close_above_ma20_to_keep_after_min_hold: true
 
 etf_sleeve:
   enabled: true
