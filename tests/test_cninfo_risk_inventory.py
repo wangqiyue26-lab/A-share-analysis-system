@@ -52,16 +52,30 @@ def test_cninfo_normalizer_accepts_chinese_columns_and_keeps_announcement_time()
     )
 
 
-def test_cninfo_normalizer_accepts_english_api_columns():
+def test_cninfo_normalizer_accepts_raw_api_columns_and_preserves_pdf_metadata():
+    timestamp_ms = int(
+        pd.Timestamp("2024-04-30 12:00:00", tz="UTC").timestamp() * 1000
+    )
     raw = pd.DataFrame(
         {
             "secCode": ["300001"],
             "secName": ["样本"],
             "announcementTitle": ["关于实施退市风险警示的公告"],
-            "announcementTime": ["2024-04-30 20:00:00"],
-            "announcementUrl": ["https://example.invalid/a"],
+            "announcementTime": [timestamp_ms],
+            "announcementId": ["123456"],
+            "orgId": ["9900000001"],
+            "adjunctUrl": ["finalpage/2024-04-30/123456.PDF"],
+            "adjunctType": ["PDF"],
         }
     )
     result = normalize_cninfo_announcements(raw, category="风险提示")
     assert result.iloc[0]["symbol"] == "300001"
     assert result.iloc[0]["event_candidate"] == "risk_warning_apply_candidate"
+    assert result.iloc[0]["announcement_id"] == "123456"
+    assert result.iloc[0]["adjunct_type"] == "PDF"
+    assert result.iloc[0]["pdf_url"] == (
+        "http://static.cninfo.com.cn/finalpage/2024-04-30/123456.PDF"
+    )
+    assert pd.Timestamp(result.iloc[0]["announcement_time"]) == pd.Timestamp(
+        "2024-04-30 20:00:00"
+    )
