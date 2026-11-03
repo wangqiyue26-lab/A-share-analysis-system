@@ -1,0 +1,56 @@
+name: ST event cross-source audit
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - main
+    paths:
+      - "src/ashare_system/st_event_crosscheck.py"
+      - "tests/test_st_event_crosscheck.py"
+      - ".github/workflows/st-event-crosscheck.yml"
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  audit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+
+      - name: Install
+        run: python -m pip install -e .
+
+      - name: Download verified CNINFO PDF events
+        uses: actions/download-artifact@v4
+        with:
+          name: st-effective-date-pilot-41632624419
+          path: reports/st-event-crosscheck/source
+          github-token: ${{ github.token }}
+          run-id: 41632624419
+
+      - name: Cross-check verified events with BaoStock
+        run: >-
+          python -m ashare_system.st_event_crosscheck
+          --verified-events reports/st-event-crosscheck/source/verified_events.csv
+          --output-dir reports/st-event-crosscheck/result
+
+      - name: Show cross-source audit
+        run: cat reports/st-event-crosscheck/result/summary.json
+
+      - name: Upload audit
+        uses: actions/upload-artifact@v4
+        with:
+          name: st-event-crosscheck-${{ github.run_id }}
+          path: reports/st-event-crosscheck/
+          retention-days: 90
