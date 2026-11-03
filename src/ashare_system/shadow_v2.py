@@ -381,7 +381,7 @@ def run_shadow_v2_pipeline(
             "latest_ranking_date": market_as_of.date().isoformat(),
             "ranking_file": str(ranking_file),
             "real_money_ready": False,
-            "cost_profile": "personal_account_v2",
+            "cost_profile": "stock_actual_plus_etf_0p5bp_min_0p5",
             "stock_history_warnings": stock_warnings,
             "etf_history_warnings": etf_warnings,
             "portfolio_config": str(portfolio_config),
