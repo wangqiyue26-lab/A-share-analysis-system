@@ -494,6 +494,7 @@ ashare-system smoke-data \
 | Phase 4G — Resilient Data Routing | ✅ | 新浪 / 东方财富一级源与多层 fallback |
 | Phase 4H — Forward Shadow Trading v1 | ✅ | 第一轮前瞻实验已冻结，失败证据永久保留 |
 | Phase 4I — Capital-aware Validation | 🟡 | 2万元、60只候选池、少持仓、ETF/现金、真实费用、20日滚动开发回测 |
+| Phase 4J — Robustness Suite | 🟡 | 冻结 v2，做滑点压力、收益集中度与2023–2024时间外验证 |
 | Strict Rolling Validation | 🚧 | PIT 股票池、超额收益、行业偏置、不同市场环境 |
 | Portfolio Risk Layer | ⏳ | 仓位、集中度、现金比例、组合回撤与暂停机制 |
 | Real-money Readiness Gate | 🔒 | 达到硬性门槛后才考虑小资金真实测试 |
@@ -586,6 +587,7 @@ ashare-system smoke-data \
 - [`docs/strict_rolling_research.md`](./docs/strict_rolling_research.md) — 严格滚动研究边界
 - [`docs/shadow_trading.md`](./docs/shadow_trading.md) — v1 前瞻影子交易协议
 - [`docs/phase4i_capital_aware_validation.md`](./docs/phase4i_capital_aware_validation.md) — 2万元 v2 与20日快速验证协议
+- [`docs/phase4j_v2_robustness.md`](./docs/phase4j_v2_robustness.md) — v2 滑点压力、时间外与收益集中度检验
 - [`THIRD_PARTY_NOTICES.md`](./THIRD_PARTY_NOTICES.md) — 第三方组件说明
 
 ---
