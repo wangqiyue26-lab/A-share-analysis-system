@@ -251,6 +251,10 @@ def _normalize_delisted(frame: pd.DataFrame, exchange: str) -> pd.DataFrame:
     )
     result["board"] = result["symbol"].map(lambda value: _infer_board(value, exchange))
     result["currently_listed"] = False
+    if exchange == "SSE":
+        result = result[result["symbol"].str.startswith("6", na=False)].copy()
+    elif exchange == "SZSE":
+        result = result[result["symbol"].str.startswith(("0", "3"), na=False)].copy()
     return (
         result.dropna(subset=["symbol", "list_date", "delist_date"])
         .drop_duplicates("symbol", keep="last")
