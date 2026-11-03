@@ -1,0 +1,163 @@
+name: Historical amount archive pilot
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - main
+    paths:
+      - "src/ashare_system/historical_amount_archive.py"
+      - "tests/test_historical_amount_archive.py"
+      - ".github/workflows/historical-amount-pilot.yml"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: historical-amount-pilot-${{ github.ref_name }}
+  cancel-in-progress: true
+
+jobs:
+  lifecycle:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+      - name: Install
+        run: python -m pip install -e .
+      - name: Build A-share lifecycle
+        shell: bash
+        run: |
+          end_date=$(python - <<'PY'
+          import pandas as pd
+          from zoneinfo import ZoneInfo
+          print(pd.Timestamp.now(tz=ZoneInfo("Asia/Shanghai")).date().isoformat())
+          PY
+          )
+          python -m ashare_system.historical_pit_reconstruction             --output-dir reports/historical-amount-pilot/lifecycle             --start 2023-01-03             --end "$end_date"
+      - name: Upload lifecycle
+        uses: actions/upload-artifact@v4
+        with:
+          name: amount-pilot-lifecycle-${{ github.run_id }}
+          path: reports/historical-amount-pilot/lifecycle/
+          retention-days: 30
+
+  archive-pilot:
+    needs: lifecycle
+    strategy:
+      fail-fast: false
+      max-parallel: 2
+      matrix:
+        shard: [0, 1, 2, 3]
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+      - name: Restore historical raw-bar cache
+        uses: actions/cache@v4
+        with:
+          path: data/cache/bars_raw
+          key: historical-amount-pilot-${{ matrix.shard }}-${{ runner.os }}-${{ github.run_id }}
+          restore-keys: |
+            historical-amount-pilot-${{ matrix.shard }}-${{ runner.os }}-
+            ashare-history-amount-probe-${{ runner.os }}-
+      - name: Install
+        run: python -m pip install -e .
+      - name: Download lifecycle
+        uses: actions/download-artifact@v4
+        with:
+          name: amount-pilot-lifecycle-${{ github.run_id }}
+          path: reports/historical-amount-pilot/lifecycle
+      - name: Archive shard
+        shell: bash
+        run: |
+          end_date=$(python - <<'PY'
+          import pandas as pd
+          from zoneinfo import ZoneInfo
+          print(pd.Timestamp.now(tz=ZoneInfo("Asia/Shanghai")).date().isoformat())
+          PY
+          )
+          python -m ashare_system.historical_amount_archive             --lifecycle-file reports/historical-amount-pilot/lifecycle/lifecycle.csv             --output-dir "reports/historical-amount-pilot/shard-${{ matrix.shard }}"             --cache-root data/cache             --period-start 2023-01-03             --period-end "$end_date"             --shard-count 32             --shard-index "${{ matrix.shard }}"             --workers 2
+      - name: Upload shard
+        uses: actions/upload-artifact@v4
+        with:
+          name: historical-amount-pilot-shard-${{ matrix.shard }}-${{ github.run_id }}
+          path: reports/historical-amount-pilot/shard-${{ matrix.shard }}/
+          retention-days: 30
+
+  assess:
+    needs: archive-pilot
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download all pilot shards
+        uses: actions/download-artifact@v4
+        with:
+          pattern: historical-amount-pilot-shard-*-${{ github.run_id }}
+          path: reports/pilot-shards
+          merge-multiple: false
+      - name: Assess provider stability
+        shell: bash
+        run: |
+          python - <<'PY'
+          import json
+          from pathlib import Path
+
+          summaries = []
+          for path in Path("reports/pilot-shards").glob("*/summary.json"):
+              summaries.append(json.loads(path.read_text(encoding="utf-8")))
+          if len(summaries) != 4:
+              raise SystemExit(f"Expected 4 pilot summaries, got {len(summaries)}")
+
+          total = sum(item["symbol_count"] for item in summaries)
+          success = sum(item["success_count"] for item in summaries)
+          failed = sum(len(item["failed_symbols"]) for item in summaries)
+          rate = success / total if total else 0.0
+          providers = {}
+          for item in summaries:
+              for provider, count in item["providers"].items():
+                  providers[provider] = providers.get(provider, 0) + int(count)
+
+          payload = {
+              "status": "complete",
+              "pilot_shards": 4,
+              "full_shard_count": 32,
+              "symbol_count": total,
+              "success_count": success,
+              "failed_symbol_count": failed,
+              "success_rate": rate,
+              "providers": providers,
+              "full_archive_gate": (
+                  "pass" if rate >= 0.95 and all(item["pilot_pass"] for item in summaries)
+                  else "fail"
+              ),
+              "note": (
+                  "Passing this pilot permits a later full 32-shard archive. "
+                  "It does not upgrade reconstructed data to strict PIT evidence."
+              ),
+          }
+          output = Path("reports/historical-amount-pilot")
+          output.mkdir(parents=True, exist_ok=True)
+          (output / "assessment.json").write_text(
+              json.dumps(payload, ensure_ascii=False, indent=2) + "\n",
+              encoding="utf-8",
+          )
+          print(json.dumps(payload, ensure_ascii=False, indent=2))
+          PY
+      - name: Upload pilot assessment
+        uses: actions/upload-artifact@v4
+        with:
+          name: historical-amount-pilot-assessment-${{ github.run_id }}
+          path: reports/historical-amount-pilot/assessment.json
+          retention-days: 90
