@@ -102,11 +102,11 @@ def merge_shards(
             if missing_columns:
                 raise RuntimeError(f"{path} missing columns {sorted(missing_columns)}")
 
-            symbol_values = set(
+            symbol_values = {
                 str(value).zfill(6)
                 for value in table.column("symbol").to_pylist()
                 if value is not None
-            )
+            }
             overlap = seen_symbols & symbol_values
             if overlap:
                 duplicate_symbol_shards.extend(sorted(overlap))
