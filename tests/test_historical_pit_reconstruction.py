@@ -31,18 +31,18 @@ def _bundle():
     )
     sse_delisted = pd.DataFrame(
         {
-            "公司代码": ["600001"],
-            "公司简称": ["退市样本"],
-            "上市日期": ["2000-01-01"],
-            "暂停上市日期": ["2024-06-20"],
+            "公司代码": ["600001", "900901"],
+            "公司简称": ["退市样本", "退市B样本"],
+            "上市日期": ["2000-01-01", "2000-01-01"],
+            "暂停上市日期": ["2024-06-20", "2024-06-20"],
         }
     )
     szse_delisted = pd.DataFrame(
         {
-            "证券代码": ["000002"],
-            "证券简称": ["退市深样本"],
-            "上市日期": ["2001-01-01"],
-            "终止上市日期": ["2025-05-10"],
+            "证券代码": ["000002", "200002"],
+            "证券简称": ["退市深样本", "退市深B样本"],
+            "上市日期": ["2001-01-01", "2001-01-01"],
+            "终止上市日期": ["2025-05-10", "2025-05-10"],
         }
     )
     return HistoricalSourceBundle(
@@ -58,6 +58,7 @@ def _bundle():
 def test_lifecycle_combines_current_and_official_delisted_membership():
     lifecycle = build_lifecycle(_bundle())
     assert set(lifecycle["symbol"]) == {"600000", "600001", "000001", "000002"}
+    assert not lifecycle["symbol"].str.startswith(("900", "200")).any()
     ended = lifecycle.set_index("symbol")
     assert not bool(ended.loc["600001", "currently_listed"])
     assert ended.loc["600001", "board"] == "上证主板"
