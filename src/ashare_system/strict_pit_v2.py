@@ -53,8 +53,14 @@ def audit_evidence_calendar(
     available_set = set(available)
     missing = sorted(expected_set - available_set)
     extra = sorted(available_set - expected_set)
+    if extra:
+        status = "invalid_nontrading_evidence"
+    elif missing:
+        status = "gap"
+    else:
+        status = "complete"
     return {
-        "status": "gap" if missing else "complete",
+        "status": status,
         "available_dates": len(available),
         "expected_trading_dates": len(expected),
         "first_evidence_date": available[0].date().isoformat(),
