@@ -17,7 +17,28 @@ class TradingRuleSet:
     settlement_days: int = 1
     commission_rate: float = 0.0003
     minimum_commission_cny: float = 5.0
+    commission_threshold_cny: float | None = None
+    commission_excess_rate: float | None = None
+    transfer_fee_rate_stock: float = 0.0
     slippage_bps: float = 5.0
+
+    @classmethod
+    def personal_account_v2(cls, *, slippage_bps: float = 5.0) -> "TradingRuleSet":
+        """Return the user's observed stock-account fee profile for Phase 4I.
+
+        Commission is CNY 5 for trades up to CNY 10,000. Above that threshold,
+        only the excess is charged at 0.0086% (0.86 basis points). Stock
+        transfer fee is modelled at 0.001% of notional on both sides. ETF
+        trades reuse the broker commission schedule but do not receive stock
+        stamp duty or stock transfer fees.
+        """
+        return cls(
+            minimum_commission_cny=5.0,
+            commission_threshold_cny=10_000.0,
+            commission_excess_rate=0.000086,
+            transfer_fee_rate_stock=0.00001,
+            slippage_bps=slippage_bps,
+        )
 
     def stamp_duty_rate(self, trade_date: str | pd.Timestamp, side: str) -> float:
         """Return historical A-share stamp duty for supported periods.
