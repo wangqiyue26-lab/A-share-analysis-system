@@ -14,17 +14,17 @@ from ashare_system.strict_pit_v2 import audit_evidence_calendar
 def _master(observed_at="2026-11-03T08:30:00Z"):
     return pd.DataFrame(
         {
-            "symbol": ["000001", "000002", "600000"],
-            "name": ["A", "B", "C"],
-            "exchange": ["SZSE", "SZSE", "SSE"],
-            "board": ["主板", "主板", "上证主板"],
-            "list_date": ["2000-01-01", "2001-01-01", "1999-01-01"],
-            "industry": ["银行", "地产", "银行"],
-            "total_shares": [1e9, 1e9, 1e9],
-            "float_shares": [8e8, 8e8, 8e8],
-            "is_st": [False, False, False],
-            "is_listed": [True, True, True],
-            "observed_at": [pd.Timestamp(observed_at)] * 3,
+            "symbol": ["000001", "000002", "430047", "600000"],
+            "name": ["A", "B", "D", "C"],
+            "exchange": ["SZSE", "SZSE", "BSE", "SSE"],
+            "board": ["主板", "主板", "北交所", "上证主板"],
+            "list_date": ["2000-01-01", "2001-01-01", "2020-11-24", "1999-01-01"],
+            "industry": ["银行", "地产", "医药", "银行"],
+            "total_shares": [1e9, 1e9, 1e8, 1e9],
+            "float_shares": [8e8, 8e8, 8e7, 8e8],
+            "is_st": [False, False, False, False],
+            "is_listed": [True, True, True, True],
+            "observed_at": [pd.Timestamp(observed_at)] * 4,
         }
     )
 
@@ -184,7 +184,7 @@ def test_load_master_as_of_refuses_future_substitution(tmp_path):
     with pytest.raises(FileNotFoundError, match="future/current state substitution is forbidden"):
         store.load_master_as_of("2026-11-02")
     master = store.load_master_as_of("2026-11-03")
-    assert set(master["symbol"]) == {"000001", "000002", "600000"}
+    assert set(master["symbol"]) == {"000001", "000002", "430047", "600000"}
 
 
 def test_strict_calendar_audit_detects_missing_trading_day(tmp_path):
