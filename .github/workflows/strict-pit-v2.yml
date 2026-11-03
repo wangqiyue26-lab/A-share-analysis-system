@@ -1,0 +1,142 @@
+name: Strict PIT v2 validation
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "15 10 * * 5"
+  push:
+    branches:
+      - main
+    paths:
+      - "research/pit/**"
+      - "src/ashare_system/pit_evidence.py"
+      - "src/ashare_system/strict_pit_v2.py"
+      - "src/ashare_system/pit_bias_report.py"
+      - "src/ashare_system/capital_aware.py"
+      - "src/ashare_system/backtest/**"
+      - "src/ashare_system/factors/**"
+      - "config/factors_v2.yml"
+      - "config/portfolio_v2.yml"
+      - ".github/workflows/strict-pit-v2.yml"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: strict-pit-v2-${{ github.ref_name }}
+  cancel-in-progress: true
+
+jobs:
+  strict-pit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+
+      - name: Restore research caches
+        uses: actions/cache@v4
+        with:
+          path: |
+            data/cache/bars_raw
+            data/cache/etf_bars_raw
+            data/cache/security_master
+            data/cache/candidate_universe
+          key: ashare-strict-pit-${{ runner.os }}-${{ github.run_id }}
+          restore-keys: |
+            ashare-strict-pit-${{ runner.os }}-
+            ashare-v2-robustness-${{ runner.os }}-
+            ashare-v2-validation-${{ runner.os }}-
+            ashare-research-cache-${{ runner.os }}-
+
+      - name: Install
+        run: python -m pip install -e .
+
+      - name: Run fail-closed strict PIT validation
+        run: >-
+          python -m ashare_system.strict_pit_v2
+          --ledger-root research/pit
+          --output-dir reports/strict-pit-v2
+          --cache-root data/cache
+          --factor-config config/factors_v2.yml
+          --portfolio-config config/portfolio_v2.yml
+          --workers 4
+          --block-days 20
+          --slippage-bps 5
+
+      - name: Inspect strict status
+        id: strict_state
+        shell: bash
+        run: |
+          python - <<'PY'
+          import json
+          import os
+          from pathlib import Path
+
+          payload = json.loads(
+              Path("reports/strict-pit-v2/summary.json").read_text(encoding="utf-8")
+          )
+          status = str(payload["status"])
+          allowed = {"no_evidence", "collecting", "complete"}
+          if status not in allowed:
+              raise SystemExit(
+                  f"Strict PIT evidence integrity failure: status={status}; "
+                  "future/current universe fallback is forbidden"
+              )
+          with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as handle:
+              handle.write(f"status={status}\n")
+              handle.write(f"start={payload.get('start', '')}\n")
+              handle.write(f"end={payload.get('end', '')}\n")
+          print(json.dumps(payload, ensure_ascii=False, indent=2))
+          PY
+
+      - name: Prepare current-universe comparator
+        if: steps.strict_state.outputs.status == 'complete'
+        run: >-
+          python -m ashare_system.robust_universe
+          --candidate-limit 60
+          --allowed-exchanges SSE,SZSE
+          --min-spot-coverage 0.80
+          --output-root reports/current-universe-comparator
+          --cache-root data/cache
+
+      - name: Run same-period current-universe comparator
+        if: steps.strict_state.outputs.status == 'complete'
+        run: >-
+          python -m ashare_system.experiment_v2
+          --candidates-file reports/current-universe-comparator/candidates.csv
+          --start "${{ steps.strict_state.outputs.start }}"
+          --end "${{ steps.strict_state.outputs.end }}"
+          --output-dir reports/current-universe-comparator/result
+          --cache-root data/cache
+          --portfolio-config config/portfolio_v2.yml
+          --factor-config config/factors_v2.yml
+          --workers 4
+          --block-days 20
+          --slippage-bps 5
+          --experiment-label strict_period_current_universe_comparator
+
+      - name: Build universe-bias comparison
+        if: steps.strict_state.outputs.status == 'complete'
+        run: >-
+          python -m ashare_system.pit_bias_report
+          --strict-summary reports/strict-pit-v2/summary.json
+          --current-summary reports/current-universe-comparator/result/summary.json
+          --output reports/strict-pit-v2/bias_comparison.json
+
+      - name: Upload strict PIT research artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: strict-pit-v2-${{ github.run_id }}
+          path: |
+            reports/strict-pit-v2/
+            reports/current-universe-comparator/
+          retention-days: 90
+          if-no-files-found: warn
