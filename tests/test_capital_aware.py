@@ -21,6 +21,9 @@ def _config():
         rebalance_every_trading_days=5,
         minimum_holding_trading_days=5,
         affordability_buffer_rate=0.002,
+        require_positive_momentum_20_for_entry=True,
+        require_close_above_ma20_for_entry=True,
+        require_close_above_ma20_to_keep_after_min_hold=True,
         etf_enabled=True,
         etf_target_weight=0.15,
         etf_max_weight_if_stock_slots_unused=0.40,
@@ -36,6 +39,8 @@ def _ranking(date, rows):
                 "board": board,
                 "is_st": False,
                 "close": close,
+                "momentum_20": 0.10,
+                "trend_close_ma20": 0.05,
                 "as_of": date,
             }
             for symbol, rank, board, close in rows
