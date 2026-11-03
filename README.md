@@ -18,7 +18,7 @@
 </div>
 
 > [!IMPORTANT]
-> 这个项目目前是**量化研究与影子实盘验证系统**，不是一个已经通过长期实盘检验的“自动荐股程序”。第一轮百万资金 Top10 日频模拟已经暴露出高换手、趋势滞后与小资金不可执行等问题；当前进入 **Phase 4I：60 只候选池 + 2 万元资本约束 v2 + ETF/现金袖套 + 20交易日滚动开发回测**。旧 v1 结果永久保留，`real_money_ready` 仍固定为 `false`。
+> 这个项目目前是**量化研究与影子实盘验证系统**，不是一个已经通过长期实盘检验的“自动荐股程序”。v2 已完成开发回测与 Phase 4J 稳健性初筛；当前进入 **Phase 4K：永久 Point-in-Time 股票池证据 + 严格 fail-closed walk-forward + current-universe 偏差对照**。2万元前瞻影子盘继续独立运行，`real_money_ready` 仍固定为 `false`。
 
 ---
 
@@ -72,11 +72,11 @@
 | 沪深300基准研究基础 | ✅ | 用于后续严格相对收益验证 |
 | GitHub Actions 云端日更 | ✅ | 不依赖本地电脑持续开机 |
 | GitHub Pages Dashboard | ✅ | 每日研究结果自动发布 |
-| 严格股票池证据留存 | ✅ | security-master 快照 + checksum + 90 天 artifact |
+| 永久 PIT 股票池证据 | 🟡 | 每日候选集永久锁定；Security Master 状态按内容哈希去重 |
 | 前瞻影子实盘 v1 | ✅ | 第一轮实验已冻结，失败结果保留作为研究证据 |
 | 2万元资本约束影子实盘 v2 | 🟡 | 周频调仓、最多3只个股、ETF/现金袖套、真实佣金 |
 | 20交易日滚动开发回测 | 🟡 | 多历史窗口快速筛错；不替代严格 PIT 验证 |
-| 扩大股票池后的严格滚动验证 | 🚧 | 仍是进入真实资金前的关键门槛 |
+| 严格 PIT walk-forward | 🟡 | 缺一天就 fail closed；满21个连续交易日后形成首个20日收益块 |
 | 小资金实盘门槛 | 🔒 | 尚未开放 |
 | ML / Qlib / LightGBM | ⏳ | 后续阶段，不急于提前引入 |
 
@@ -94,7 +94,8 @@ PIT 基本面              ██████████  ✅
 v1 前瞻实验             ██████████  ✅ 已冻结并保留失败证据
 v2 2万元影子实盘        ███░░░░░░░  🟡 新一轮前瞻验证
 20日历史开发回测         ██████░░░░  🟡 自动化框架已建立
-严格滚动验证            ██░░░░░░░░  🚧
+永久 PIT 证据账本       ███░░░░░░░  🟡 开始向前积累
+严格 PIT walk-forward   ██░░░░░░░░  🟡 等待连续证据窗口
 真实资金准备度          ░░░░░░░░░░  🔒 false
 ```
 
@@ -137,6 +138,9 @@ flowchart TD
     R --> J[基本面补充页]
 
     I --> K[每日研究 Dashboard]
+    D --> PIT[永久 PIT Candidate Ledger]
+    B --> PIT
+    PIT --> STRICT[Strict PIT Walk-forward]
     I --> L[不可回改 Shadow Signal]
     L --> M[下一交易日模拟执行]
     M --> N[收益 / 回撤 / 胜率 / 成本证据]
@@ -347,6 +351,8 @@ research/shadow_v2/rankings/YYYY-MM-DD.csv
 | `.github/workflows/ci.yml` | Ruff、单元测试、CLI health、真实公网 smoke test |
 | `.github/workflows/daily.yml` | 60只股票池 → v2 因子 → PIT 基本面 → 2万元 Shadow v2 → Pages |
 | `.github/workflows/v2-validation.yml` | 历史多窗口 20 交易日开发回测与版本淘汰 |
+| `.github/workflows/v2-robustness.yml` | v2 滑点压力、时间外与收益集中度测试 |
+| `.github/workflows/strict-pit-v2.yml` | 永久 PIT 账本驱动的 fail-closed 严格 walk-forward |
 | `.github/workflows/pages.yml` | 手工预览 / Pages 辅助任务 |
 
 普通代码 `push` 可以验证生产链，但**不会写入正式影子交易信号**。只有主分支的定时/手工正式运行才允许锁定模拟交易证据，避免开发行为污染前瞻样本。
@@ -386,6 +392,10 @@ reports/production/shadow_v2/
 ```text
 research/shadow/signals/       # 冻结的 v1 决策证据
 research/shadow_v2/rankings/   # 当前 v2 不可回改排名证据
+research/pit/
+├── days/                      # 每个交易日的 provenance / checksum
+├── candidates/                # 当天实际使用的60只候选股
+└── security_master/states/    # 按内容哈希去重的主档状态
 ```
 
 ### 20日开发回测
@@ -399,7 +409,7 @@ reports/v2-validation/
 └── summary.json
 ```
 
-此外，完整 Security Master 观察会被生成带 SHA-256 校验信息的 90 天 GitHub Actions artifact，用于未来严格滚动研究。
+此外，完整 Security Master 仍保留 workflow artifact 备份；Phase 4K 进一步把真正用于严格研究的候选集和主档状态写入永久、不可回改的 Git 证据账本。历史缺口不会用今天的股票池补齐。
 
 ### GitHub Pages
 
@@ -422,6 +432,7 @@ A-share-analysis-system/
 ├── reports/                  # 运行时研究产物
 ├── research/shadow/signals/  # 冻结的 v1 前瞻证据
 ├── research/shadow_v2/       # v2 2万元前瞻排名证据
+├── research/pit/             # 永久 PIT universe 证据账本
 ├── src/ashare_system/
 │   ├── backtest/             # A 股交易规则、成本、回测引擎、绩效指标
 │   ├── data/                 # 行情、财务、Security Master、PIT、缓存、路由
@@ -433,6 +444,9 @@ A-share-analysis-system/
 │   ├── capital_aware.py      # 少持仓 / 周频 / ETF / 可买性组合构造
 │   ├── rolling_validation.py # 20交易日窗口评估
 │   ├── experiment_v2.py      # 快速历史开发回测
+│   ├── pit_evidence.py       # 不可回改 PIT 候选池 / 主档证据
+│   ├── strict_pit_v2.py      # fail-closed 严格 PIT walk-forward
+│   ├── pit_bias_report.py    # current-universe vs strict PIT 偏差对照
 │   ├── enrich_daily.py       # PIT 基本面增强
 │   ├── reporting.py          # 研究输出
 │   └── site.py               # 静态 Dashboard
@@ -494,8 +508,9 @@ ashare-system smoke-data \
 | Phase 4G — Resilient Data Routing | ✅ | 新浪 / 东方财富一级源与多层 fallback |
 | Phase 4H — Forward Shadow Trading v1 | ✅ | 第一轮前瞻实验已冻结，失败证据永久保留 |
 | Phase 4I — Capital-aware Validation | 🟡 | 2万元、60只候选池、少持仓、ETF/现金、真实费用、20日滚动开发回测 |
-| Phase 4J — Robustness Suite | 🟡 | 冻结 v2，做滑点压力、收益集中度与2023–2024时间外验证 |
-| Strict Rolling Validation | 🚧 | PIT 股票池、超额收益、行业偏置、不同市场环境 |
+| Phase 4J — Robustness Suite | ✅ | v2 通过滑点压力与2023–2024时间外初筛，但仍存在 current-universe bias |
+| Phase 4K — Strict PIT Validation | 🟡 | 永久候选池证据、主档状态去重、缺口 fail closed、同期 bias comparison |
+| Strict Rolling Validation | 🟡 | 首个完整严格20日窗口需等待连续 PIT 证据积累 |
 | Portfolio Risk Layer | ⏳ | 仓位、集中度、现金比例、组合回撤与暂停机制 |
 | Real-money Readiness Gate | 🔒 | 达到硬性门槛后才考虑小资金真实测试 |
 | Phase 5 — ML Lab | ⏳ | Qlib / LightGBM / Walk-forward / 模型集成 |
@@ -510,7 +525,7 @@ ashare-system smoke-data \
 
 ### 1. 不用未来股票池重建过去
 
-如果某个历史时点之前没有真实留存的 Security Master 快照，严格研究会选择失败关闭，而不是拿今天的上市股票名单假装那就是当年的股票池。
+Phase 4K 从永久 `research/pit/` 账本读取当天实际候选集；如果基准交易日历中缺少任何一天的 exact candidate evidence，严格回测直接返回 `evidence_gap`。没有真实留存证据的历史日期保持不可验证，不拿今天的股票名单补齐。
 
 ### 2. 不用未来财报解释过去
 
@@ -588,6 +603,7 @@ ashare-system smoke-data \
 - [`docs/shadow_trading.md`](./docs/shadow_trading.md) — v1 前瞻影子交易协议
 - [`docs/phase4i_capital_aware_validation.md`](./docs/phase4i_capital_aware_validation.md) — 2万元 v2 与20日快速验证协议
 - [`docs/phase4j_v2_robustness.md`](./docs/phase4j_v2_robustness.md) — v2 滑点压力、时间外与收益集中度检验
+- [`docs/phase4k_strict_pit.md`](./docs/phase4k_strict_pit.md) — 永久 PIT 证据、fail-closed 严格回测与偏差对照
 - [`THIRD_PARTY_NOTICES.md`](./THIRD_PARTY_NOTICES.md) — 第三方组件说明
 
 ---
@@ -598,9 +614,11 @@ ashare-system smoke-data \
 
 - 可重建的行情与财务数据：GitHub Actions cache / `data/cache/`；
 - 每日中间产物：短期 workflow artifacts；
-- 完整 Security Master：额外保留 90 天研究 artifact；
+- 完整 Security Master artifact：继续作为短中期备份；
+- `research/pit/candidates/`：永久保存每天实际使用的60只候选；
+- `research/pit/security_master/states/`：仅在状态变化时新增内容寻址主档；
 - GitHub Pages：只发布生成后的静态研究页面；
-- `research/shadow/signals/`：只保存小体积的每日决策证据，用于防止 hindsight rewrite。
+- `research/shadow/signals/` / `research/shadow_v2/`：保存不可回改的前瞻决策证据。
 
 这种设计尽量在**仓库体积、可复现性、免费云端运行成本和研究严谨性**之间取得平衡。
 
