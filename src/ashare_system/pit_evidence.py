@@ -51,6 +51,17 @@ def _normalize_master_state(frame: pd.DataFrame) -> pd.DataFrame:
     return state.sort_values("symbol").reset_index(drop=True)
 
 
+def _to_bool_series(series: pd.Series) -> pd.Series:
+    if pd.api.types.is_bool_dtype(series):
+        return series.astype(bool)
+    normalized = series.astype(str).str.strip().str.lower()
+    invalid = ~normalized.isin({"true", "false", "1", "0"})
+    if invalid.any():
+        values = sorted(normalized[invalid].unique())
+        raise ValueError(f"Unsupported boolean values: {values[:10]}")
+    return normalized.isin({"true", "1"})
+
+
 def _normalize_candidates(frame: pd.DataFrame) -> pd.DataFrame:
     required = {
         "symbol",
@@ -70,8 +81,8 @@ def _normalize_candidates(frame: pd.DataFrame) -> pd.DataFrame:
     result = frame.copy()
     result["symbol"] = result["symbol"].astype(str).str.zfill(6)
     result["list_date"] = pd.to_datetime(result["list_date"], errors="coerce")
-    result["is_st"] = result["is_st"].astype(bool)
-    result["is_listed"] = result["is_listed"].astype(bool)
+    result["is_st"] = _to_bool_series(result["is_st"])
+    result["is_listed"] = _to_bool_series(result["is_listed"])
     result["amount"] = pd.to_numeric(result["amount"], errors="raise")
     if result["symbol"].duplicated().any():
         raise ValueError("Candidate evidence contains duplicate symbols")
@@ -132,6 +143,45 @@ def stage_pit_evidence(
         observed_at = observed_at.tz_localize("UTC")
     else:
         observed_at = observed_at.tz_convert("UTC")
+
+    manifest_observed_at = pd.Timestamp(universe_manifest["security_master_observed_at"])
+    if manifest_observed_at.tzinfo is None:
+        manifest_observed_at = manifest_observed_at.tz_localize("UTC")
+    else:
+        manifest_observed_at = manifest_observed_at.tz_convert("UTC")
+    if observed_at != manifest_observed_at:
+        raise RuntimeError(
+            "Latest cached security master does not match the exact master used by "
+            f"the universe run: cache={observed_at.isoformat()} "
+            f"manifest={manifest_observed_at.isoformat()}"
+        )
+
+    master_check = state.loc[
+        :,
+        ["symbol", "exchange", "board", "list_date", "is_st", "is_listed"],
+    ].copy()
+    candidate_check = candidates.loc[
+        :,
+        ["symbol", "exchange", "board", "list_date", "is_st", "is_listed"],
+    ].copy()
+    joined = candidate_check.merge(
+        master_check,
+        on="symbol",
+        how="left",
+        suffixes=("_candidate", "_master"),
+        validate="one_to_one",
+    )
+    for column in ("exchange", "board", "is_st", "is_listed"):
+        left = joined[f"{column}_candidate"].astype(str)
+        right = joined[f"{column}_master"].astype(str)
+        if not left.equals(right):
+            raise RuntimeError(
+                f"Candidate metadata disagrees with observed security master for {column}"
+            )
+    left_dates = pd.to_datetime(joined["list_date_candidate"], errors="coerce")
+    right_dates = pd.to_datetime(joined["list_date_master"], errors="coerce")
+    if not left_dates.equals(right_dates):
+        raise RuntimeError("Candidate list_date disagrees with observed security master")
 
     output = Path(output_dir)
     output.mkdir(parents=True, exist_ok=True)
@@ -342,8 +392,8 @@ class PITEvidenceStore:
         frame = pd.read_csv(path, dtype={"symbol": str})
         frame["symbol"] = frame["symbol"].astype(str).str.zfill(6)
         frame["list_date"] = pd.to_datetime(frame["list_date"], errors="coerce")
-        frame["is_st"] = frame["is_st"].astype(bool)
-        frame["is_listed"] = frame["is_listed"].astype(bool)
+        frame["is_st"] = _to_bool_series(frame["is_st"])
+        frame["is_listed"] = _to_bool_series(frame["is_listed"])
         return frame.loc[:, MASTER_STATE_COLUMNS].sort_values("symbol").reset_index(drop=True)
 
     def load_master_as_of(self, as_of: str | pd.Timestamp) -> pd.DataFrame:
