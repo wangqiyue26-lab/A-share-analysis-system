@@ -13,6 +13,7 @@ dependencies = [
   "numpy>=1.26",
   "pandas>=2.2",
   "pyarrow>=17",
+  "pypdf>=5.0",
   "PyYAML>=6.0",
   "tenacity>=9.0",
 ]

@@ -10,6 +10,10 @@ import pandas as pd
 from tenacity import retry, stop_after_attempt, wait_exponential
 
 RISK_CATEGORIES = ("特别处理和退市", "风险提示")
+CATEGORY_CODES = {
+    "特别处理和退市": "category_tbclts_szsh",
+    "风险提示": "category_fxts_szsh",
+}
 
 APPLY_PATTERNS = (
     r"实施退市风险警示",
@@ -94,16 +98,44 @@ class CNInfoRiskAnnouncementProvider:
         start: pd.Timestamp,
         end: pd.Timestamp,
     ) -> pd.DataFrame:
-        import akshare as ak
+        from akshare.utils import http
 
-        return ak.stock_zh_a_disclosure_report_cninfo(
-            symbol="",
-            market="沪深京",
-            keyword="",
-            category=category,
-            start_date=start.strftime("%Y%m%d"),
-            end_date=end.strftime("%Y%m%d"),
-        )
+        url = "http://www.cninfo.com.cn/new/hisAnnouncement/query"
+        payload = {
+            "pageNum": "1",
+            "pageSize": "30",
+            "column": "szse",
+            "tabName": "fulltext",
+            "plate": "",
+            "stock": "",
+            "searchkey": "",
+            "secid": "",
+            "category": CATEGORY_CODES[category],
+            "trade": "",
+            "seDate": f"{start.date().isoformat()}~{end.date().isoformat()}",
+            "sortName": "",
+            "sortType": "",
+            "isHLtitle": "false",
+        }
+        frames: list[pd.DataFrame] = []
+        page = 1
+        while True:
+            payload["pageNum"] = str(page)
+            response = http.post(url, data=payload)
+            response.raise_for_status()
+            body = response.json()
+            announcements = body.get("announcements") or []
+            if announcements:
+                frames.append(pd.DataFrame(announcements))
+            if not body.get("hasMore"):
+                break
+            page += 1
+            if page > 200:
+                raise RuntimeError(
+                    f"CNINFO pagination safety cap exceeded for {category} "
+                    f"{start.date()}..{end.date()}"
+                )
+        return pd.concat(frames, ignore_index=True) if frames else pd.DataFrame()
 
     def fetch(self, *, start: str, end: str) -> CNInfoFetchResult:
         frames: list[pd.DataFrame] = []
@@ -138,6 +170,11 @@ class CNInfoRiskAnnouncementProvider:
                     "announcement_title",
                     "announcement_time",
                     "announcement_link",
+                    "announcement_id",
+                    "org_id",
+                    "adjunct_url",
+                    "adjunct_type",
+                    "pdf_url",
                     "category",
                     "event_candidate",
                     "source",
@@ -156,12 +193,24 @@ class CNInfoRiskAnnouncementProvider:
         )
 
 
+def _parse_announcement_time(series: pd.Series) -> pd.Series:
+    numeric = pd.to_numeric(series, errors="coerce")
+    if numeric.notna().mean() > 0.90:
+        parsed = pd.to_datetime(numeric, unit="ms", utc=True, errors="coerce")
+        return parsed.dt.tz_convert("Asia/Shanghai").dt.tz_localize(None)
+    return pd.to_datetime(series, errors="coerce")
+
+
 def normalize_cninfo_announcements(frame: pd.DataFrame, *, category: str) -> pd.DataFrame:
     code_col = _first_column(frame, ("代码", "secCode", "证券代码"))
     name_col = _first_column(frame, ("简称", "secName", "证券简称"))
     title_col = _first_column(frame, ("公告标题", "announcementTitle", "标题"))
     time_col = _first_column(frame, ("公告时间", "announcementTime", "公告日期"))
-    link_col = _first_column(frame, ("公告链接", "adjunctUrl", "announcementUrl", "链接"))
+    link_col = _first_column(frame, ("公告链接", "announcementUrl", "链接"))
+    announcement_id_col = _first_column(frame, ("announcementId", "公告ID"))
+    org_id_col = _first_column(frame, ("orgId", "组织ID"))
+    adjunct_col = _first_column(frame, ("adjunctUrl", "附件路径"))
+    adjunct_type_col = _first_column(frame, ("adjunctType", "附件类型"))
 
     required = {
         "code": code_col,
@@ -180,13 +229,50 @@ def normalize_cninfo_announcements(frame: pd.DataFrame, *, category: str) -> pd.
             "symbol": frame[code_col].astype(str).str.extract(r"(\d{6})", expand=False),
             "name": frame[name_col].astype(str),
             "announcement_title": frame[title_col].astype(str),
-            "announcement_time": pd.to_datetime(frame[time_col], errors="coerce"),
+            "announcement_time": _parse_announcement_time(frame[time_col]),
             "announcement_link": (
                 frame[link_col].astype(str) if link_col else pd.Series("", index=frame.index)
+            ),
+            "announcement_id": (
+                frame[announcement_id_col].astype(str)
+                if announcement_id_col
+                else pd.Series("", index=frame.index)
+            ),
+            "org_id": (
+                frame[org_id_col].astype(str)
+                if org_id_col
+                else pd.Series("", index=frame.index)
+            ),
+            "adjunct_url": (
+                frame[adjunct_col].astype(str)
+                if adjunct_col
+                else pd.Series("", index=frame.index)
+            ),
+            "adjunct_type": (
+                frame[adjunct_type_col].astype(str)
+                if adjunct_type_col
+                else pd.Series("", index=frame.index)
             ),
         }
     )
     result = result.dropna(subset=["symbol", "announcement_time"])
+    result["pdf_url"] = result["adjunct_url"].map(
+        lambda value: (
+            f"http://static.cninfo.com.cn/{str(value).lstrip('/')}"
+            if str(value).strip() and str(value).lower() != "nan"
+            else ""
+        )
+    )
+    missing_detail = result["announcement_link"].eq("")
+    if missing_detail.any():
+        result.loc[missing_detail, "announcement_link"] = result.loc[missing_detail].apply(
+            lambda row: (
+                "http://www.cninfo.com.cn/new/disclosure/detail?"
+                f"stockCode={row['symbol']}&announcementId={row['announcement_id']}"
+                f"&orgId={row['org_id']}&announcementTime={row['announcement_time']}"
+            ),
+            axis=1,
+        )
     result["symbol"] = result["symbol"].str.zfill(6)
     result = result[result["symbol"].str.match(r"^[036]\d{5}$", na=False)].copy()
     result["category"] = category
@@ -220,7 +306,7 @@ def run_inventory(
         "status": "inventory_complete" if not frame.empty else "inventory_empty",
         "start": pd.Timestamp(start).date().isoformat(),
         "end": pd.Timestamp(end).date().isoformat(),
-        "source": "CNINFO information-disclosure search via AKShare",
+        "source": "CNINFO information-disclosure search raw API",
         "source_url": (
             "https://www.cninfo.com.cn/new/commonUrl/pageOfSearch?"
             "url=disclosure/list/search"
