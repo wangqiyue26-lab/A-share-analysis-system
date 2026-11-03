@@ -66,8 +66,10 @@ class TradingRuleSet:
         date = pd.Timestamp(trade_date).normalize()
         normalized = board.strip().lower()
 
-        if normalized in {"科创板", "star", "star_market"}:
+        if normalized in {"科创板", "star", "star_market", "etf20"}:
             return 0.20
+        if normalized in {"etf", "etf10"}:
+            return 0.10
         if normalized in {"北交所", "bse", "beijing"}:
             return 0.30
         if normalized in {"创业板", "chinext"}:
