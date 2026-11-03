@@ -215,3 +215,34 @@ def test_strict_calendar_audit_detects_missing_trading_day(tmp_path):
     audit = audit_evidence_calendar(PITEvidenceStore(ledger), benchmark)
     assert audit["status"] == "gap"
     assert audit["missing_dates"] == ["2026-11-04"]
+
+
+def test_stage_rejects_master_provenance_mismatch(tmp_path):
+    cache = tmp_path / "cache"
+    from ashare_system.data.security_master import SecurityMasterSnapshotStore
+
+    SecurityMasterSnapshotStore(cache).save(_master())
+    candidates = tmp_path / "candidates.csv"
+    _candidates().to_csv(candidates, index=False)
+    manifest = tmp_path / "universe_manifest.json"
+    manifest.write_text(
+        json.dumps(
+            {
+                "prepared_as_of": "2026-11-03",
+                "degraded_mode": False,
+                "spot_provider_source": "akshare_sina_all_a_spot",
+                "spot_coverage": 0.99,
+                "listing_age_verified": True,
+                "security_master_source": "akshare_exchange_security_master",
+                "security_master_observed_at": "2026-11-03T08:31:00+00:00",
+            }
+        ),
+        encoding="utf-8",
+    )
+    with pytest.raises(RuntimeError, match="does not match the exact master"):
+        stage_pit_evidence(
+            cache_root=cache,
+            candidates_file=candidates,
+            universe_manifest_file=manifest,
+            output_dir=tmp_path / "stage",
+        )
