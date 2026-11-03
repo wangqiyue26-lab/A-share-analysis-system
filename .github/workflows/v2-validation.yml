@@ -67,7 +67,7 @@ jobs:
           print(pd.Timestamp.now(tz=ZoneInfo("Asia/Shanghai")).date().isoformat())
           PY
           )
-          python -m ashare_system.experiment_v2             --candidates-file reports/v2-universe/candidates.csv             --start 2025-01-02             --end "$end_date"             --output-dir reports/v2-validation             --cache-root data/cache             --portfolio-config config/portfolio_v2.yml             --factor-config config/factors.yml             --workers 4             --block-days 20
+          python -m ashare_system.experiment_v2             --candidates-file reports/v2-universe/candidates.csv             --start 2025-01-02             --end "$end_date"             --output-dir reports/v2-validation             --cache-root data/cache             --portfolio-config config/portfolio_v2.yml             --factor-config config/factors_v2.yml             --workers 4             --block-days 20
       - name: Show validation summary
         run: cat reports/v2-validation/summary.json
       - name: Upload validation artifact
