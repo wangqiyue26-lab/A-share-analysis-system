@@ -24,6 +24,7 @@ class _Position:
     last_buy_date: pd.Timestamp | None = None
     board: str = "主板"
     is_st: bool = False
+    instrument_type: str = "stock"
 
 
 @dataclass
@@ -33,6 +34,7 @@ class _PendingTarget:
     target_weight: float
     board: str
     is_st: bool
+    instrument_type: str = "stock"
 
 
 class BacktestEngine:
@@ -65,6 +67,14 @@ class BacktestEngine:
         signal_frame = signals.copy()
         signal_frame["trade_date"] = pd.to_datetime(signal_frame["trade_date"]).dt.normalize()
         signal_frame["symbol"] = signal_frame["symbol"].astype(str).str.zfill(6)
+        if "instrument_type" not in signal_frame:
+            signal_frame["instrument_type"] = "stock"
+        signal_frame["instrument_type"] = (
+            signal_frame["instrument_type"].fillna("stock").astype(str).str.lower()
+        )
+        unsupported = sorted(set(signal_frame["instrument_type"]) - {"stock", "etf"})
+        if unsupported:
+            raise ValueError(f"Unsupported instrument_type values: {unsupported}")
         if ((signal_frame["target_weight"] < 0) | (signal_frame["target_weight"] > 1)).any():
             raise ValueError("target_weight must be between 0 and 1")
         if signal_frame.groupby("trade_date")["target_weight"].sum().gt(1.0000001).any():
@@ -103,6 +113,11 @@ class BacktestEngine:
                 side_guess = "buy" if target_value > pos.shares * raw_open else "sell"
                 board = order.board if side_guess == "buy" or pos.shares <= 0 else pos.board
                 is_st = order.is_st if side_guess == "buy" or pos.shares <= 0 else pos.is_st
+                instrument_type = (
+                    order.instrument_type
+                    if side_guess == "buy" or pos.shares <= 0
+                    else pos.instrument_type
+                )
                 limit_pct = self.rules.price_limit_pct(
                     trade_date=date,
                     board=board,
@@ -140,6 +155,7 @@ class BacktestEngine:
                     side=side,
                     trade_date=date,
                     rules=self.rules,
+                    instrument_type=instrument_type,
                 )
                 if side == "buy":
                     total_cash = notional + costs.total
@@ -151,6 +167,7 @@ class BacktestEngine:
                             side=side,
                             trade_date=date,
                             rules=self.rules,
+                            instrument_type=instrument_type,
                         )
                         total_cash = notional + costs.total
                     if quantity <= 0:
@@ -160,6 +177,7 @@ class BacktestEngine:
                     pos.last_buy_date = date
                     pos.board = order.board
                     pos.is_st = order.is_st
+                    pos.instrument_type = order.instrument_type
                 else:
                     quantity = min(quantity, pos.shares)
                     if quantity <= 0:
@@ -171,6 +189,7 @@ class BacktestEngine:
                         side=side,
                         trade_date=date,
                         rules=self.rules,
+                        instrument_type=instrument_type,
                     )
                     cash += notional - costs.total
                     pos.shares -= quantity
@@ -182,9 +201,13 @@ class BacktestEngine:
                         "side": side,
                         "shares": quantity,
                         "price": fill,
+                        "raw_open": raw_open,
                         "notional": notional,
+                        "slippage_cost": abs(fill - raw_open) * quantity,
                         "commission": costs.commission,
                         "stamp_duty": costs.stamp_duty,
+                        "transfer_fee": costs.transfer_fee,
+                        "instrument_type": instrument_type,
                         "signal_date": order.signal_date,
                     }
                 )
@@ -204,6 +227,7 @@ class BacktestEngine:
                             0.0,
                             pos.board,
                             pos.is_st,
+                            pos.instrument_type,
                         )
                 for _, signal in group.iterrows():
                     pending[str(signal["symbol"])] = _PendingTarget(
@@ -212,6 +236,7 @@ class BacktestEngine:
                         target_weight=float(signal["target_weight"]),
                         board=str(signal["board"]),
                         is_st=bool(signal["is_st"]),
+                        instrument_type=str(signal["instrument_type"]).lower(),
                     )
 
         equity_curve = pd.DataFrame(equity_rows)

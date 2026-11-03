@@ -18,7 +18,7 @@
 </div>
 
 > [!IMPORTANT]
-> 这个项目目前是**量化研究与影子实盘验证系统**，不是一个已经通过长期实盘检验的“自动荐股程序”。当前正式生产仍使用一个为云端稳定性设计的 **30 只沪深候选池 → Top10** 流程；扩大股票池、严格滚动验证和组合风险控制仍在继续建设。`real_money_ready` 在当前阶段固定为 `false`。
+> 这个项目目前是**量化研究与影子实盘验证系统**，不是一个已经通过长期实盘检验的“自动荐股程序”。第一轮百万资金 Top10 日频模拟已经暴露出高换手、趋势滞后与小资金不可执行等问题；当前进入 **Phase 4I：60 只候选池 + 2 万元资本约束 v2 + ETF/现金袖套 + 20交易日滚动开发回测**。旧 v1 结果永久保留，`real_money_ready` 仍固定为 `false`。
 
 ---
 
@@ -73,8 +73,10 @@
 | GitHub Actions 云端日更 | ✅ | 不依赖本地电脑持续开机 |
 | GitHub Pages Dashboard | ✅ | 每日研究结果自动发布 |
 | 严格股票池证据留存 | ✅ | security-master 快照 + checksum + 90 天 artifact |
-| 前瞻影子实盘 | 🟡 | 已上线，正在积累不可回改的真实时间序列 |
-| 扩大股票池后的严格滚动验证 | 🚧 | 下一阶段重点 |
+| 前瞻影子实盘 v1 | ✅ | 第一轮实验已冻结，失败结果保留作为研究证据 |
+| 2万元资本约束影子实盘 v2 | 🟡 | 周频调仓、最多3只个股、ETF/现金袖套、真实佣金 |
+| 20交易日滚动开发回测 | 🟡 | 多历史窗口快速筛错；不替代严格 PIT 验证 |
+| 扩大股票池后的严格滚动验证 | 🚧 | 仍是进入真实资金前的关键门槛 |
 | 小资金实盘门槛 | 🔒 | 尚未开放 |
 | ML / Qlib / LightGBM | ⏳ | 后续阶段，不急于提前引入 |
 
@@ -89,7 +91,9 @@
 每日选股生产            ██████████  ✅
 PIT 基本面              ██████████  ✅
 交易规则回测            ██████████  ✅
-影子实盘证据            ███░░░░░░░  🟡 持续积累中
+v1 前瞻实验             ██████████  ✅ 已冻结并保留失败证据
+v2 2万元影子实盘        ███░░░░░░░  🟡 新一轮前瞻验证
+20日历史开发回测         ██████░░░░  🟡 自动化框架已建立
 严格滚动验证            ██░░░░░░░░  🚧
 真实资金准备度          ░░░░░░░░░░  🔒 false
 ```
@@ -97,14 +101,16 @@ PIT 基本面              ██████████  ✅
 ### 当前生产基线
 
 - **市场范围**：沪深 A 股（当前生产候选池暂不含北交所）。
-- **候选池**：每日构建 30 只高流动性候选股票。
-- **最终研究排名**：Top10。
-- **生产评分**：只使用可解释市场因子。
-- **基本面因子**：已经计算，但目前只作为补充解释层，不参与正式综合分。
-- **影子组合**：Top10 等权，虚拟本金 100 万元。
+- **候选池**：每日构建 60 只高流动性沪深股票。
+- **研究排名**：保留 Top10 解释层，但 v2 不再机械买入全部 Top10。
+- **生产评分**：v2 使用更偏风险控制的可解释市场因子权重。
+- **基本面因子**：继续作为补充解释层，暂不进入正式综合分。
+- **v2 模拟资金**：¥20,000。
+- **v2 个股仓位**：最多 3 只，每只目标约 25%，每 5 个交易日再平衡。
+- **ETF / 现金**：独立袖套承接未使用仓位；趋势不合格时允许持有现金。
 - **真实资金状态**：`real_money_ready = false`。
 
-> 30 只候选池是当前免费公网数据源和 GitHub 云端稳定性约束下的生产起点，不代表最终研究范围已经足够。系统下一阶段会在数据证据允许的前提下继续扩大股票池。
+> 60 只仍是零付费公网数据和 GitHub 云端可靠性之间的阶段性折中，不代表最终研究范围已经充分。
 
 ---
 
@@ -119,7 +125,7 @@ flowchart TD
     S4[近期历史成交额重建] --> C
 
     B --> C
-    C --> D[30只候选池]
+    C --> D[60只候选池]
     D --> E[逐股日线历史数据]
     E --> F[统一 Bar Schema + Parquet Cache]
     F --> G[市场因子计算]
@@ -200,7 +206,7 @@ flowchart TD
 | `max_drawdown_60` | 过去 60 日最大回撤幅度 | ↓ 越低越好 |
 | `log_amount_20` | 20 日平均成交额的对数 | ↑ 流动性更高 |
 
-因子先经过极值处理，再进行横截面 z-score 标准化，最后按照 [`config/factors.yml`](./config/factors.yml) 中的权重和方向生成综合分。
+因子先经过极值处理，再进行横截面 z-score 标准化。v1 权重保留在 [`config/factors.yml`](./config/factors.yml)，当前 v2 生产使用 [`config/factors_v2.yml`](./config/factors_v2.yml)：动量/趋势权重从 55% 降到 40%，波动率与最大回撤合计提高到 50%，并记录 close/MA20 状态作为资本约束组合的入场与续持门槛。
 
 系统同时保留：
 
@@ -246,68 +252,56 @@ flowchart TD
 
 ## 影子实盘与前瞻验证
 
-Phase 4H 开始后，系统不再只做“历史回测”，而是每天保存它在**当时真正会做出的决定**。
+第一轮 Phase 4H 的百万资金 Top10 日频等权模拟已经完成其最重要的任务：**暴露系统问题，而不是证明系统赚钱**。v1 的不可回改账本继续保留在 `research/shadow/signals/`，不会因为策略升级而删除或重算。
 
-### 基线模拟组合
+### Phase 4I：2万元资本约束 v2
 
-| 项目 | 当前规则 |
+| 项目 | v2 规则 |
 | --- | --- |
-| 初始虚拟资金 | ¥1,000,000 |
-| 组合 | 每日 Top10 |
-| 权重 | 等权 |
-| 信号时间 | 当日收盘后 |
-| 最早成交 | 下一交易日开盘 |
-| 交易约束 | T+1 / 涨跌停 / 停牌 / 100 股整数手 |
-| 成本 | 佣金 + 印花税 + 滑点 |
-| 基本面是否参与选股 | 否，仍是补充研究层 |
+| 初始虚拟资金 | ¥20,000 |
+| 个股数量 | 最多 3 只 |
+| 单只目标权重 | 约 25% |
+| 个股总权重 | 最多 75% |
+| 最低现金 | 10% |
+| 调仓频率 | 每 5 个交易日 |
+| 新进排名 | Top5 |
+| 持有缓冲 | 排名仍在 Top10 且趋势门槛通过可继续持有 |
+| 最低持有期 | 5 个交易日 |
+| 可买性 | 目标仓位必须买得起至少 1 手 |
+| ETF | 独立趋势袖套，不与个股因子直接混排 |
+| 最早成交 | 收盘信号后的下一交易日 |
 | 真实资金状态 | `false` |
 
-### 不可回改的信号证据
+v2 使用用户实际账户费用模型：1万元以内佣金 5 元；超过 1 万元的部分按万 0.86；股票过户费和卖出印花税单独计入，并继续保留 5 bps 模拟滑点。ETF 目前沿用同一券商佣金阶梯，但不套用股票印花税/股票过户费；未来拿到真实 ETF 交割单后再校准。
 
-每天首次观察到的正式信号保存为：
+v2 每日排名证据保存在：
 
 ```text
-research/shadow/signals/YYYY-MM-DD.csv
+research/shadow_v2/rankings/YYYY-MM-DD.csv
 ```
 
-其中记录：
+这些文件同时保存综合分、20日动量、收盘价与 close/MA20 趋势状态，因此以后可以审计“当时为什么允许买入/续持”。
 
-- 当天排名；
-- 股票代码与名称；
-- 综合分；
-- 目标权重；
-- 板块与 ST 元数据；
-- 数据来源；
-- 策略版本；
-- 第一次观察到该信号的时间。
+### 20交易日滚动开发回测
 
-如果同一个市场日期以后重新运行，系统允许读取**完全相同**的信号，但如果新结果试图覆盖当天已经锁定的不同排名，流水线会拒绝改写。
+为了避免每次策略修改都现实等待 20 个交易日，Phase 4I 新增快速历史实验：
 
-这解决了量化研究里非常重要的一个问题：**不能在知道结果以后回头把过去的决定改得更漂亮。**
+```text
+历史数据 → 多个互不重叠的20交易日窗口
+         → 收益 / 沪深300超额 / 最大回撤
+         → 换手 / 交易笔数 / 费用 / 滑点
+         → 版本比较与淘汰
+```
 
-### 影子组合会统计什么
+这条轨道可以一次评估很多 20 日区间，加快发现设计错误。但当前快速历史实验使用“当前可观察候选池”回放更早历史，因此存在 survivorship bias，只能作为**开发回测**，不能冒充严格 PIT 证据。
 
-- 累计收益率；
-- 年化收益率；
-- 年化波动率；
-- 最大回撤；
-- Sharpe Ratio；
-- 组合每日正收益比例；
-- 模拟交易笔数；
-- 实际成交与成本；
-- 累计观察交易日；
-- 后续增加基准超额、个股持有期命中率、行业归因与换手分析。
+真正的证据层次是：
 
-### 固定观察窗口
+1. 历史 20 日开发回测：快速筛错；
+2. 严格 PIT / 历史股票池验证：防止未来数据与幸存者偏差；
+3. 新的 v2 前瞻影子盘：最终样本外检验。
 
-| 阶段 | 规则 |
-| --- | --- |
-| 0–19 个收益观察日 | 只收集证据，不因为短期盈亏改因子 |
-| 第 20 日 | 第一次诊断：数据、成本、换手、集中度、明显执行问题 |
-| 20–59 日 | 持续前瞻收集，仅比较预先声明的策略版本 |
-| 60+ 日 | 开始更严格的滚动验证、基准归因与市场环境分析 |
-
-详细协议见 [`docs/shadow_trading.md`](./docs/shadow_trading.md)。
+详细规则见 [`docs/phase4i_capital_aware_validation.md`](./docs/phase4i_capital_aware_validation.md)。
 
 ---
 
@@ -351,7 +345,8 @@ research/shadow/signals/YYYY-MM-DD.csv
 | Workflow | 作用 |
 | --- | --- |
 | `.github/workflows/ci.yml` | Ruff、单元测试、CLI health、真实公网 smoke test |
-| `.github/workflows/daily.yml` | 股票池 → 历史行情 → 因子 → Top10 → PIT 基本面 → Shadow → Pages |
+| `.github/workflows/daily.yml` | 60只股票池 → v2 因子 → PIT 基本面 → 2万元 Shadow v2 → Pages |
+| `.github/workflows/v2-validation.yml` | 历史多窗口 20 交易日开发回测与版本淘汰 |
 | `.github/workflows/pages.yml` | 手工预览 / Pages 辅助任务 |
 
 普通代码 `push` 可以验证生产链，但**不会写入正式影子交易信号**。只有主分支的定时/手工正式运行才允许锁定模拟交易证据，避免开发行为污染前瞻样本。
@@ -376,21 +371,32 @@ reports/production/selection/
 └── fundamental_summary.json
 ```
 
-### 影子实盘
+### 影子实盘 v2
 
 ```text
-reports/production/shadow/
+reports/production/shadow_v2/
 ├── equity_curve.csv
 ├── trades.csv
-├── signal_history.csv
+├── portfolio_signals.csv
 └── metrics.json
 ```
 
 ### 长期证据
 
 ```text
-research/shadow/signals/
-└── YYYY-MM-DD.csv
+research/shadow/signals/       # 冻结的 v1 决策证据
+research/shadow_v2/rankings/   # 当前 v2 不可回改排名证据
+```
+
+### 20日开发回测
+
+```text
+reports/v2-validation/
+├── rolling_20d.csv
+├── equity_curve.csv
+├── trades.csv
+├── signals.csv
+└── summary.json
 ```
 
 此外，完整 Security Master 观察会被生成带 SHA-256 校验信息的 90 天 GitHub Actions artifact，用于未来严格滚动研究。
@@ -414,14 +420,19 @@ A-share-analysis-system/
 ├── data/                     # 本地/Actions 缓存目录（大数据不进 Git）
 ├── docs/                     # 生产、PIT、严格滚动、Shadow 等研究文档
 ├── reports/                  # 运行时研究产物
-├── research/shadow/signals/  # 小体积、不可回改的前瞻决策证据
+├── research/shadow/signals/  # 冻结的 v1 前瞻证据
+├── research/shadow_v2/       # v2 2万元前瞻排名证据
 ├── src/ashare_system/
 │   ├── backtest/             # A 股交易规则、成本、回测引擎、绩效指标
 │   ├── data/                 # 行情、财务、Security Master、PIT、缓存、路由
 │   ├── factors/              # 市场因子与基本面因子
 │   ├── production.py         # 每日选股生产
 │   ├── robust_universe.py    # 多源候选池路由
-│   ├── shadow_trading.py     # 前瞻影子实盘
+│   ├── shadow_trading.py     # 冻结的 v1 前瞻影子实盘
+│   ├── shadow_v2.py          # 2万元资本约束前瞻实盘
+│   ├── capital_aware.py      # 少持仓 / 周频 / ETF / 可买性组合构造
+│   ├── rolling_validation.py # 20交易日窗口评估
+│   ├── experiment_v2.py      # 快速历史开发回测
 │   ├── enrich_daily.py       # PIT 基本面增强
 │   ├── reporting.py          # 研究输出
 │   └── site.py               # 静态 Dashboard
@@ -481,8 +492,9 @@ ashare-system smoke-data \
 | Phase 4D — Fundamental Research Layer | ✅ | Top10 基本面补充页与失败隔离 |
 | Phase 4F — Strict Rolling Evidence | ✅ | Security Master 快照与严格历史证据 |
 | Phase 4G — Resilient Data Routing | ✅ | 新浪 / 东方财富一级源与多层 fallback |
-| Phase 4H — Forward Shadow Trading | 🟡 | 不可回改信号、下一日模拟执行、前瞻绩效 |
-| Strict Rolling Validation | 🚧 | 扩大股票池、超额收益、行业偏置、换手与市场环境 |
+| Phase 4H — Forward Shadow Trading v1 | ✅ | 第一轮前瞻实验已冻结，失败证据永久保留 |
+| Phase 4I — Capital-aware Validation | 🟡 | 2万元、60只候选池、少持仓、ETF/现金、真实费用、20日滚动开发回测 |
+| Strict Rolling Validation | 🚧 | PIT 股票池、超额收益、行业偏置、不同市场环境 |
 | Portfolio Risk Layer | ⏳ | 仓位、集中度、现金比例、组合回撤与暂停机制 |
 | Real-money Readiness Gate | 🔒 | 达到硬性门槛后才考虑小资金真实测试 |
 | Phase 5 — ML Lab | ⏳ | Qlib / LightGBM / Walk-forward / 模型集成 |
@@ -531,9 +543,9 @@ ashare-system smoke-data \
 </details>
 
 <details>
-<summary><strong>为什么现在只从 30 只候选股票里选 Top10？</strong></summary>
+<summary><strong>为什么现在使用 60 只候选股票？</strong></summary>
 
-这是免费公网全市场端点在 GitHub 云 Runner 上存在限流、断连和超时情况下的生产稳定性起点。30 只并不是最终目标。未来会在数据源、严格历史股票池证据和运行成本允许的情况下扩大研究范围。
+第一轮 30 只候选池过窄，容易把“高成交热门股”偏好再次放大。v2 将范围扩大到 60 只，同时仍控制 GitHub Runner 的逐股历史请求规模。60 只仍是阶段性工程折中，不是最终研究宇宙。
 
 </details>
 
@@ -572,7 +584,8 @@ ashare-system smoke-data \
 - [`docs/production_pipeline.md`](./docs/production_pipeline.md) — 云端生产与存储规则
 - [`docs/pit_fundamental_enrichment.md`](./docs/pit_fundamental_enrichment.md) — PIT 基本面增强
 - [`docs/strict_rolling_research.md`](./docs/strict_rolling_research.md) — 严格滚动研究边界
-- [`docs/shadow_trading.md`](./docs/shadow_trading.md) — 前瞻影子交易协议
+- [`docs/shadow_trading.md`](./docs/shadow_trading.md) — v1 前瞻影子交易协议
+- [`docs/phase4i_capital_aware_validation.md`](./docs/phase4i_capital_aware_validation.md) — 2万元 v2 与20日快速验证协议
 - [`THIRD_PARTY_NOTICES.md`](./THIRD_PARTY_NOTICES.md) — 第三方组件说明
 
 ---

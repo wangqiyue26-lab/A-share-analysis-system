@@ -31,6 +31,7 @@ def compute_market_factors(frame: pd.DataFrame) -> dict[str, object]:
     ma20 = close.tail(20).mean()
     ma60 = close.tail(60).mean()
     trend_ma20_ma60 = ma20 / ma60 - 1.0
+    trend_close_ma20 = close.iloc[-1] / ma20 - 1.0
 
     recent_returns = returns.tail(20).dropna()
     if len(recent_returns) < 20:
@@ -51,6 +52,7 @@ def compute_market_factors(frame: pd.DataFrame) -> dict[str, object]:
         "momentum_20": float(momentum_20),
         "momentum_60": float(momentum_60),
         "trend_ma20_ma60": float(trend_ma20_ma60),
+        "trend_close_ma20": float(trend_close_ma20),
         "volatility_20": float(volatility_20),
         "max_drawdown_60": max_drawdown_60,
         "log_amount_20": log_amount_20,
@@ -61,6 +63,7 @@ def compute_market_factors(frame: pd.DataFrame) -> dict[str, object]:
     return {
         "symbol": str(bars.iloc[-1]["symbol"]).zfill(6),
         "as_of": bars.iloc[-1]["trade_date"],
+        "close": float(close.iloc[-1]),
         "average_amount_20": float(average_amount_20),
         **values,
     }

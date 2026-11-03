@@ -33,3 +33,60 @@ def test_trade_cost_has_minimum_commission_and_sell_stamp_duty():
 def test_execution_price_applies_slippage_directionally():
     assert execution_price(10.0, "buy", 5) == pytest.approx(10.005)
     assert execution_price(10.0, "sell", 5) == pytest.approx(9.995)
+
+
+def test_personal_v2_cost_profile_matches_small_stock_trade_receipt():
+    rules = TradingRuleSet.personal_account_v2(slippage_bps=0)
+    buy = trade_cost(
+        notional=5512.0,
+        side="buy",
+        trade_date="2026-11-01",
+        rules=rules,
+        instrument_type="stock",
+    )
+    sell = trade_cost(
+        notional=5584.0,
+        side="sell",
+        trade_date="2026-11-02",
+        rules=rules,
+        instrument_type="stock",
+    )
+
+    assert buy.commission == pytest.approx(5.0)
+    assert buy.transfer_fee == pytest.approx(0.06)
+    assert buy.stamp_duty == 0.0
+    assert sell.commission == pytest.approx(5.0)
+    assert sell.transfer_fee == pytest.approx(0.06)
+    assert sell.stamp_duty == pytest.approx(2.79)
+
+
+def test_personal_v2_commission_charges_only_excess_above_ten_thousand():
+    rules = TradingRuleSet.personal_account_v2(slippage_bps=0)
+    cost = trade_cost(
+        notional=20_000.0,
+        side="buy",
+        trade_date="2026-11-02",
+        rules=rules,
+        instrument_type="stock",
+    )
+    assert cost.commission == pytest.approx(5.86)
+
+
+def test_equity_etf_uses_broker_commission_without_stock_taxes():
+    rules = TradingRuleSet.personal_account_v2(slippage_bps=0)
+    cost = trade_cost(
+        notional=8_000.0,
+        side="sell",
+        trade_date="2026-11-02",
+        rules=rules,
+        instrument_type="etf",
+    )
+    assert cost.commission == pytest.approx(5.0)
+    assert cost.stamp_duty == 0.0
+    assert cost.transfer_fee == 0.0
+
+
+def test_etf_price_limit_classes():
+    rules = TradingRuleSet()
+    assert rules.price_limit_pct(trade_date="2026-11-03", board="ETF10") == pytest.approx(0.10)
+    assert rules.price_limit_pct(trade_date="2026-11-03", board="ETF20") == pytest.approx(0.20)

@@ -1,0 +1,80 @@
+name: V2 20-day validation
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - main
+    paths:
+      - "config/portfolio_v2.yml"
+      - "src/ashare_system/capital_aware.py"
+      - "src/ashare_system/rolling_validation.py"
+      - "src/ashare_system/experiment_v2.py"
+      - "src/ashare_system/shadow_v2.py"
+      - "src/ashare_system/data/etf.py"
+      - "src/ashare_system/backtest/**"
+      - "src/ashare_system/factors/**"
+      - ".github/workflows/v2-validation.yml"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: v2-validation-${{ github.ref_name }}
+  cancel-in-progress: true
+
+jobs:
+  historical-development:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+      - name: Restore research caches
+        uses: actions/cache@v4
+        with:
+          path: |
+            data/cache/security_master
+            data/cache/candidate_universe
+            data/cache/bars_raw
+            data/cache/etf_bars_raw
+          key: ashare-v2-validation-${{ runner.os }}-${{ github.run_id }}
+          restore-keys: |
+            ashare-v2-validation-${{ runner.os }}-
+            ashare-research-cache-${{ runner.os }}-
+            ashare-universe-${{ runner.os }}-
+      - name: Install
+        run: python -m pip install -e .
+      - name: Prepare 60-name development universe
+        run: >-
+          python -m ashare_system.robust_universe
+          --candidate-limit 60
+          --allowed-exchanges SSE,SZSE
+          --min-spot-coverage 0.80
+          --output-root reports/v2-universe
+          --cache-root data/cache
+      - name: Run historical 20-day blocks
+        shell: bash
+        run: |
+          end_date=$(python - <<'PY'
+          import pandas as pd
+          from zoneinfo import ZoneInfo
+          print(pd.Timestamp.now(tz=ZoneInfo("Asia/Shanghai")).date().isoformat())
+          PY
+          )
+          python -m ashare_system.experiment_v2             --candidates-file reports/v2-universe/candidates.csv             --start 2025-01-02             --end "$end_date"             --output-dir reports/v2-validation             --cache-root data/cache             --portfolio-config config/portfolio_v2.yml             --factor-config config/factors_v2.yml             --workers 4             --block-days 20
+      - name: Show validation summary
+        run: cat reports/v2-validation/summary.json
+      - name: Upload validation artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: v2-20day-validation-${{ github.run_id }}
+          path: |
+            reports/v2-validation/
+            reports/v2-universe/
+          retention-days: 30
