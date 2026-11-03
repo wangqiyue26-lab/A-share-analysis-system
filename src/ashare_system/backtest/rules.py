@@ -23,7 +23,7 @@ class TradingRuleSet:
     slippage_bps: float = 5.0
 
     @classmethod
-    def personal_account_v2(cls, *, slippage_bps: float = 5.0) -> "TradingRuleSet":
+    def personal_account_v2(cls, *, slippage_bps: float = 5.0) -> TradingRuleSet:
         """Return the user's observed stock-account fee profile for Phase 4I.
 
         Commission is CNY 5 for trades up to CNY 10,000. Above that threshold,
