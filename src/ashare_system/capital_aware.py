@@ -20,6 +20,9 @@ class CapitalAwarePortfolioConfig:
     rebalance_every_trading_days: int
     minimum_holding_trading_days: int
     affordability_buffer_rate: float
+    require_positive_momentum_20_for_entry: bool
+    require_close_above_ma20_for_entry: bool
+    require_close_above_ma20_to_keep_after_min_hold: bool
     etf_enabled: bool
     etf_target_weight: float
     etf_max_weight_if_stock_slots_unused: float
@@ -47,6 +50,15 @@ def load_capital_aware_config(
         rebalance_every_trading_days=int(portfolio["rebalance_every_trading_days"]),
         minimum_holding_trading_days=int(portfolio["minimum_holding_trading_days"]),
         affordability_buffer_rate=float(portfolio.get("affordability_buffer_rate", 0.0)),
+        require_positive_momentum_20_for_entry=bool(
+            portfolio.get("require_positive_momentum_20_for_entry", False)
+        ),
+        require_close_above_ma20_for_entry=bool(
+            portfolio.get("require_close_above_ma20_for_entry", False)
+        ),
+        require_close_above_ma20_to_keep_after_min_hold=bool(
+            portfolio.get("require_close_above_ma20_to_keep_after_min_hold", False)
+        ),
         etf_enabled=bool(etf.get("enabled", False)),
         etf_target_weight=float(etf.get("target_weight", 0.0)),
         etf_max_weight_if_stock_slots_unused=float(
@@ -73,7 +85,15 @@ def load_capital_aware_config(
 
 
 def _validated_ranking(frame: pd.DataFrame, date: pd.Timestamp) -> pd.DataFrame:
-    required = {"symbol", "rank", "board", "is_st", "close"}
+    required = {
+        "symbol",
+        "rank",
+        "board",
+        "is_st",
+        "close",
+        "momentum_20",
+        "trend_close_ma20",
+    }
     missing = sorted(required - set(frame.columns))
     if missing:
         raise ValueError(f"ranking for {date.date()} missing columns: {missing}")
@@ -81,7 +101,16 @@ def _validated_ranking(frame: pd.DataFrame, date: pd.Timestamp) -> pd.DataFrame:
     result["symbol"] = result["symbol"].astype(str).str.zfill(6)
     result["rank"] = pd.to_numeric(result["rank"], errors="coerce")
     result["close"] = pd.to_numeric(result["close"], errors="coerce")
-    result = result[result["rank"].notna() & result["close"].gt(0)].copy()
+    result["momentum_20"] = pd.to_numeric(result["momentum_20"], errors="coerce")
+    result["trend_close_ma20"] = pd.to_numeric(
+        result["trend_close_ma20"], errors="coerce"
+    )
+    result = result[
+        result["rank"].notna()
+        & result["close"].gt(0)
+        & result["momentum_20"].notna()
+        & result["trend_close_ma20"].notna()
+    ].copy()
     return result.sort_values(["rank", "symbol"]).reset_index(drop=True)
 
 
@@ -131,8 +160,18 @@ def capital_aware_stock_signals(
             row = by_symbol.get(symbol)
             age = index - int(meta["entry_index"])
             rank = int(row.rank) if row is not None else None
+            keep_trend_ok = True
+            if (
+                age >= config.minimum_holding_trading_days
+                and config.require_close_above_ma20_to_keep_after_min_hold
+            ):
+                keep_trend_ok = (
+                    row is not None and float(row.trend_close_ma20) > 0.0
+                )
             if age < config.minimum_holding_trading_days or (
-                rank is not None and rank <= config.keep_rank_max
+                rank is not None
+                and rank <= config.keep_rank_max
+                and keep_trend_ok
             ):
                 selected.append(symbol)
 
@@ -143,6 +182,16 @@ def capital_aware_stock_signals(
                 break
             symbol = str(row.symbol)
             if symbol in selected or int(row.rank) > config.entry_rank_max:
+                continue
+            if (
+                config.require_positive_momentum_20_for_entry
+                and float(row.momentum_20) <= 0.0
+            ):
+                continue
+            if (
+                config.require_close_above_ma20_for_entry
+                and float(row.trend_close_ma20) <= 0.0
+            ):
                 continue
             one_lot_cost = (
                 float(row.close)
