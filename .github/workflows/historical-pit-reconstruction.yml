@@ -1,0 +1,140 @@
+name: Historical PIT reconstruction inventory
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "40 11 * * 6"
+  push:
+    branches:
+      - main
+    paths:
+      - "src/ashare_system/historical_pit_reconstruction.py"
+      - "src/ashare_system/cninfo_risk_inventory.py"
+      - "tests/test_historical_pit_reconstruction.py"
+      - "tests/test_cninfo_risk_inventory.py"
+      - "docs/phase4k2_historical_reconstruction.md"
+      - ".github/workflows/historical-pit-reconstruction.yml"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: historical-pit-reconstruction-${{ github.ref_name }}
+  cancel-in-progress: true
+
+jobs:
+  lifecycle:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+
+      - name: Install
+        run: python -m pip install -e .
+
+      - name: Reconstruct official exchange lifecycle inventory
+        shell: bash
+        run: |
+          end_date=$(python - <<'PY'
+          import pandas as pd
+          from zoneinfo import ZoneInfo
+          print(pd.Timestamp.now(tz=ZoneInfo("Asia/Shanghai")).date().isoformat())
+          PY
+          )
+          python -m ashare_system.historical_pit_reconstruction             --output-dir reports/historical-pit/lifecycle             --start 2023-01-03             --end "$end_date"
+
+      - name: Enforce reconstruction evidence grade
+        run: |
+          python - <<'PY'
+          import json
+          from pathlib import Path
+
+          payload = json.loads(
+              Path("reports/historical-pit/lifecycle/summary.json").read_text(
+                  encoding="utf-8"
+              )
+          )
+          assert payload["strict_point_in_time_universe"] is False
+          assert payload["strict_candidate_reconstruction_ready"] is False
+          assert payload["reconstruction_grade"] == (
+              "official_reconstructed_membership_not_strict"
+          )
+          assert payload["listing_date_coverage"] == 1.0
+          assert payload["delist_date_coverage_for_delisted"] == 1.0
+          print(json.dumps(payload, ensure_ascii=False, indent=2))
+          PY
+
+      - name: Upload lifecycle reconstruction artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: historical-pit-lifecycle-${{ github.run_id }}
+          path: reports/historical-pit/lifecycle/
+          retention-days: 90
+
+  risk-announcements:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        year: [2023, 2024, 2025, 2026]
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+
+      - name: Install
+        run: python -m pip install -e .
+
+      - name: Inventory CNINFO risk-warning disclosures
+        shell: bash
+        run: |
+          year="${{ matrix.year }}"
+          current_year=$(date -u +%Y)
+          if [ "$year" = "$current_year" ]; then
+            end_date=$(python - <<'PY'
+          import pandas as pd
+          from zoneinfo import ZoneInfo
+          print(pd.Timestamp.now(tz=ZoneInfo("Asia/Shanghai")).date().isoformat())
+          PY
+            )
+          else
+            end_date="${year}-12-31"
+          fi
+          python -m ashare_system.cninfo_risk_inventory             --output-dir "reports/historical-pit/cninfo/${year}"             --start "${year}-01-01"             --end "$end_date"
+
+      - name: Verify no effective-date inference
+        run: |
+          python - <<'PY'
+          import json
+          from pathlib import Path
+
+          year = "${{ matrix.year }}"
+          payload = json.loads(
+              Path(
+                  f"reports/historical-pit/cninfo/{year}/summary.json"
+              ).read_text(encoding="utf-8")
+          )
+          assert payload["strict_point_in_time_evidence"] is False
+          assert payload["effective_date_status"] == "not_parsed"
+          print(json.dumps(payload, ensure_ascii=False, indent=2))
+          PY
+
+      - name: Upload risk-announcement artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: historical-pit-cninfo-${{ matrix.year }}-${{ github.run_id }}
+          path: reports/historical-pit/cninfo/${{ matrix.year }}/
+          retention-days: 90
