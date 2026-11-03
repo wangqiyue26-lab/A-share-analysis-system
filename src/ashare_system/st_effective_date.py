@@ -51,9 +51,13 @@ def _resolve_effective_date(
 ) -> pd.Timestamp | None:
     if year_text:
         try:
-            return pd.Timestamp(year=int(year_text), month=month, day=day).normalize()
+            value = pd.Timestamp(year=int(year_text), month=month, day=day).normalize()
         except ValueError:
             return None
+        delta = (value - announcement_time.normalize()).days
+        if -60 <= delta <= 30:
+            return value
+        return None
 
     candidates: list[pd.Timestamp] = []
     for year in (announcement_time.year - 1, announcement_time.year, announcement_time.year + 1):
