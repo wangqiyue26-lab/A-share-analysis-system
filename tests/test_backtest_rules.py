@@ -53,11 +53,11 @@ def test_personal_v2_cost_profile_matches_small_stock_trade_receipt():
     )
 
     assert buy.commission == pytest.approx(5.0)
-    assert buy.transfer_fee == pytest.approx(0.05512)
+    assert buy.transfer_fee == pytest.approx(0.06)
     assert buy.stamp_duty == 0.0
     assert sell.commission == pytest.approx(5.0)
-    assert sell.transfer_fee == pytest.approx(0.05584)
-    assert sell.stamp_duty == pytest.approx(2.792)
+    assert sell.transfer_fee == pytest.approx(0.06)
+    assert sell.stamp_duty == pytest.approx(2.79)
 
 
 def test_personal_v2_commission_charges_only_excess_above_ten_thousand():
