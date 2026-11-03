@@ -11,11 +11,15 @@ on:
       - "src/ashare_system/archive_security_master.py"
       - "src/ashare_system/enrich_daily.py"
       - "src/ashare_system/shadow_trading.py"
+      - "src/ashare_system/shadow_v2.py"
+      - "src/ashare_system/capital_aware.py"
+      - "src/ashare_system/rolling_validation.py"
       - "src/ashare_system/backtest/**"
       - "src/ashare_system/fundamentals_pipeline.py"
       - "src/ashare_system/data/spot.py"
       - "src/ashare_system/data/cache.py"
       - "src/ashare_system/data/financials.py"
+      - "src/ashare_system/data/etf.py"
       - "src/ashare_system/data/pit_cache.py"
       - "src/ashare_system/data/point_in_time.py"
       - "src/ashare_system/data/security_master.py"
@@ -67,7 +71,7 @@ jobs:
           mkdir -p reports/universe
           set +e
           python -m ashare_system.robust_universe \
-            --candidate-limit 30 \
+            --candidate-limit 60 \
             --allowed-exchanges SSE,SZSE \
             --min-spot-coverage 0.80 \
             --output-root reports/universe \
@@ -79,7 +83,7 @@ jobs:
           if [ "$status" -ne 0 ]; then
             echo "All validated live spot sources unavailable; entering explicit cache/history fallbacks."
             python -m ashare_system.bootstrap_universe \
-              --candidate-limit 30 \
+              --candidate-limit 60 \
               --allowed-exchanges SSE,SZSE \
               --output-root reports/universe \
               --cache-root data/cache \
@@ -94,7 +98,7 @@ jobs:
 
           frame = pd.read_csv("reports/universe/candidates.csv", dtype={"symbol": str})
           manifest = json.loads(Path("reports/universe/universe_manifest.json").read_text(encoding="utf-8"))
-          assert len(frame) >= 30
+          assert len(frame) >= 60
           assert set(frame["exchange"]) <= {"SSE", "SZSE"}
           is_st = frame["is_st"].astype(str).str.lower().isin({"true", "1"})
           assert not is_st.any()
@@ -171,6 +175,7 @@ jobs:
         with:
           path: |
             data/cache/bars_raw
+            data/cache/etf_bars_raw
             data/cache/financials
           key: ashare-research-cache-${{ runner.os }}-${{ github.run_id }}
           restore-keys: |
@@ -184,7 +189,7 @@ jobs:
           --candidates-file reports/universe/candidates.csv
           --top 10
           --history-days 420
-          --workers 2
+          --workers 4
           --adjust ""
           --output-root reports/production
           --site-dir site
@@ -199,17 +204,17 @@ jobs:
           --workers 2
           --refresh-days 7
           --stale-days 30
-      - name: Run scheduled shadow portfolio
+      - name: Run scheduled CNY 20k shadow portfolio v2
         if: github.ref == 'refs/heads/main' && (github.event_name == 'schedule' || github.event_name == 'workflow_dispatch')
         run: >-
-          python -m ashare_system.shadow_trading
+          python -m ashare_system.shadow_v2
           --selected-file reports/production/selection/selected.csv
-          --ledger-root research/shadow
-          --output-dir reports/production/shadow
+          --ledger-root research/shadow_v2
+          --output-dir reports/production/shadow_v2
           --site-dir site
           --cache-root data/cache
-          --initial-cash 1000000
-          --workers 2
+          --portfolio-config config/portfolio_v2.yml
+          --workers 4
       - name: Verify production outputs
         run: |
           python - <<'PY'
@@ -231,32 +236,34 @@ jobs:
           assert manifest["fundamental_scoring_integration"] is False
           index = Path("site/index.html").read_text(encoding="utf-8")
           assert "fundamentals.html" in index
-          shadow_metrics = Path("reports/production/shadow/metrics.json")
+          shadow_metrics = Path("reports/production/shadow_v2/metrics.json")
           if shadow_metrics.exists():
               shadow = json.loads(shadow_metrics.read_text(encoding="utf-8"))
               assert shadow["real_money_ready"] is False
-              assert Path("site/shadow.html").exists()
-              assert "shadow.html" in Path("site/index.html").read_text(encoding="utf-8")
+              assert shadow["strategy_version"] == "capital-aware-v2"
+              assert float(shadow["initial_cash"]) == 20000.0
+              assert Path("site/shadow_v2.html").exists()
+              assert "shadow_v2.html" in Path("site/index.html").read_text(encoding="utf-8")
               print(json.dumps(shadow, ensure_ascii=False, indent=2))
           print(json.dumps(manifest, ensure_ascii=False, indent=2))
           print(json.dumps(fundamental, ensure_ascii=False, indent=2))
           PY
-      - name: Upload shadow-signal backup
+      - name: Upload v2 shadow-ranking backup
         if: github.ref == 'refs/heads/main' && (github.event_name == 'schedule' || github.event_name == 'workflow_dispatch')
         uses: actions/upload-artifact@v4
         with:
-          name: shadow-ledger-${{ github.run_id }}
-          path: research/shadow/signals/
+          name: shadow-v2-ledger-${{ github.run_id }}
+          path: research/shadow_v2/rankings/
           retention-days: 90
-      - name: Persist immutable shadow signal
+      - name: Persist immutable v2 ranking
         if: github.ref == 'refs/heads/main' && (github.event_name == 'schedule' || github.event_name == 'workflow_dispatch')
         shell: bash
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add research/shadow/signals/*.csv
+          git add research/shadow_v2/rankings/*.csv
           if git diff --cached --quiet; then
-            echo "Shadow signal already persisted for this market date."
+            echo "V2 ranking already persisted for this market date."
           else
             signal_date=$(python - <<'PY'
           import pandas as pd
@@ -264,7 +271,7 @@ jobs:
           print(pd.to_datetime(frame["as_of"]).max().date().isoformat())
           PY
             )
-            git commit -m "shadow: lock signal ${signal_date}"
+            git commit -m "shadow-v2: lock ranking ${signal_date}"
             git push origin HEAD:main
           fi
       - name: Upload research artifact
