@@ -16,6 +16,8 @@ def _selected(symbols=("000001", "600000")):
             "rank": list(range(1, count + 1)),
             "composite_score": [1.0 - i * 0.1 for i in range(count)],
             "close": [10.0 + i for i in range(count)],
+            "momentum_20": [0.10] * count,
+            "trend_close_ma20": [0.05] * count,
             "screen_source": ["sina_spot_amount"] * count,
         }
     )
