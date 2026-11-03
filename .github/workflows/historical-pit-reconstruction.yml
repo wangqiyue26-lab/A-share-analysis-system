@@ -10,7 +10,9 @@ on:
     paths:
       - "src/ashare_system/historical_pit_reconstruction.py"
       - "src/ashare_system/cninfo_risk_inventory.py"
+      - "src/ashare_system/historical_amount_probe.py"
       - "tests/test_historical_pit_reconstruction.py"
+      - "tests/test_historical_amount_probe.py"
       - "tests/test_cninfo_risk_inventory.py"
       - "docs/phase4k2_historical_reconstruction.md"
       - ".github/workflows/historical-pit-reconstruction.yml"
@@ -137,4 +139,58 @@ jobs:
         with:
           name: historical-pit-cninfo-${{ matrix.year }}-${{ github.run_id }}
           path: reports/historical-pit/cninfo/${{ matrix.year }}/
+          retention-days: 90
+
+
+  amount-coverage-probe:
+    needs: lifecycle
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+
+      - name: Restore raw-bar probe cache
+        uses: actions/cache@v4
+        with:
+          path: data/cache/bars_raw
+          key: ashare-history-amount-probe-${{ runner.os }}-${{ github.run_id }}
+          restore-keys: |
+            ashare-history-amount-probe-${{ runner.os }}-
+            ashare-research-cache-${{ runner.os }}-
+
+      - name: Install
+        run: python -m pip install -e .
+
+      - name: Download corrected lifecycle inventory
+        uses: actions/download-artifact@v4
+        with:
+          name: historical-pit-lifecycle-${{ github.run_id }}
+          path: reports/historical-pit/lifecycle
+
+      - name: Probe current and delisted A-share history coverage
+        shell: bash
+        run: |
+          end_date=$(python - <<'PY'
+          import pandas as pd
+          from zoneinfo import ZoneInfo
+          print(pd.Timestamp.now(tz=ZoneInfo("Asia/Shanghai")).date().isoformat())
+          PY
+          )
+          python -m ashare_system.historical_amount_probe             --lifecycle-file reports/historical-pit/lifecycle/lifecycle.csv             --output-dir reports/historical-pit/amount-probe             --cache-root data/cache             --period-start 2023-01-03             --period-end "$end_date"             --per-cohort 12             --workers 4
+
+      - name: Show amount-history coverage decision
+        run: cat reports/historical-pit/amount-probe/summary.json
+
+      - name: Upload amount-history coverage probe
+        uses: actions/upload-artifact@v4
+        with:
+          name: historical-pit-amount-probe-${{ github.run_id }}
+          path: reports/historical-pit/amount-probe/
           retention-days: 90
