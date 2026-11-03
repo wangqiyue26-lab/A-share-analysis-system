@@ -179,7 +179,7 @@ jobs:
           --period-end 2026-11-03
           --shard-count 32
           --shard-index "${{ matrix.shard }}"
-          --workers 2
+          --workers 1
       - name: Enforce shard success gate
         shell: bash
         run: |
