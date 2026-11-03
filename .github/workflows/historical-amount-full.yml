@@ -13,6 +13,7 @@ on:
 
 permissions:
   contents: read
+  actions: read
 
 concurrency:
   group: historical-amount-full-${{ github.ref_name }}
@@ -32,12 +33,70 @@ jobs:
           cache: pip
       - name: Install
         run: python -m pip install -e .
-      - name: Build fixed-end A-share lifecycle
-        run: >-
-          python -m ashare_system.historical_pit_reconstruction
-          --output-dir reports/historical-amount-full/lifecycle
-          --start 2023-01-03
-          --end 2026-11-03
+      - name: Build fixed-end A-share lifecycle with audited fallback
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          mkdir -p reports/historical-amount-full/lifecycle
+          set +e
+          python -m ashare_system.historical_pit_reconstruction \
+            --output-dir reports/historical-amount-full/lifecycle \
+            --start 2023-01-03 \
+            --end 2026-11-03
+          live_status=$?
+          set -e
+
+          if [ "$live_status" -eq 0 ]; then
+            printf '{"source":"live_official_reconstruction","source_run_id":"%s"}\n' \
+              "${GITHUB_RUN_ID}" > reports/historical-amount-full/lifecycle/source.json
+          else
+            echo "Live lifecycle reconstruction failed; looking for latest validated main-branch artifact."
+            rm -rf reports/historical-amount-full/lifecycle/*
+            prior_run=$(gh run list \
+              --workflow historical-pit-reconstruction.yml \
+              --branch main \
+              --status success \
+              --limit 1 \
+              --json databaseId \
+              --jq '.[0].databaseId')
+            if [ -z "$prior_run" ] || [ "$prior_run" = "null" ]; then
+              echo "No successful historical PIT lifecycle run is available."
+              exit 1
+            fi
+
+            mkdir -p reports/historical-amount-full/fallback
+            gh run download "$prior_run" \
+              --pattern 'historical-pit-lifecycle-*' \
+              --dir reports/historical-amount-full/fallback
+
+            lifecycle_file=$(find reports/historical-amount-full/fallback -name lifecycle.csv -print -quit)
+            summary_file=$(find reports/historical-amount-full/fallback -name summary.json -print -quit)
+            if [ -z "$lifecycle_file" ] || [ -z "$summary_file" ]; then
+              echo "Prior artifact does not contain lifecycle.csv and summary.json."
+              exit 1
+            fi
+            cp "$lifecycle_file" reports/historical-amount-full/lifecycle/lifecycle.csv
+            cp "$summary_file" reports/historical-amount-full/lifecycle/summary.json
+            printf '{"source":"prior_successful_artifact","source_run_id":"%s"}\n' \
+              "$prior_run" > reports/historical-amount-full/lifecycle/source.json
+          fi
+
+          python - <<'PY'
+          import json
+          from pathlib import Path
+
+          root = Path("reports/historical-amount-full/lifecycle")
+          payload = json.loads((root / "summary.json").read_text(encoding="utf-8"))
+          source = json.loads((root / "source.json").read_text(encoding="utf-8"))
+          assert payload["status"] == "inventory_complete", payload
+          assert payload["period_start"] == "2023-01-03", payload
+          assert payload["period_end"] == "2026-11-03", payload
+          assert payload["listing_date_coverage"] == 1.0, payload
+          assert payload["delist_date_coverage_for_delisted"] == 1.0, payload
+          assert int(payload["lifecycle_symbol_counts"]["total"]) >= 5500, payload
+          print(json.dumps({"lifecycle": payload, "source": source}, ensure_ascii=False, indent=2))
+          PY
       - name: Upload lifecycle
         uses: actions/upload-artifact@v4
         with:
