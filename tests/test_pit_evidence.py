@@ -246,3 +246,33 @@ def test_stage_rejects_master_provenance_mismatch(tmp_path):
             universe_manifest_file=manifest,
             output_dir=tmp_path / "stage",
         )
+
+
+def test_strict_calendar_audit_rejects_nontrading_evidence_date(tmp_path):
+    stage = _stage(tmp_path)
+    ledger = tmp_path / "ledger"
+    persist_staged_evidence(
+        staging_dir=stage,
+        ledger_root=ledger,
+        now=pd.Timestamp("2026-11-03T16:00:00", tz="Asia/Shanghai"),
+    )
+
+    manifest_path = stage / "manifest.json"
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    manifest["evidence_date"] = "2026-11-07"
+    manifest_path.write_text(json.dumps(manifest), encoding="utf-8")
+    persist_staged_evidence(
+        staging_dir=stage,
+        ledger_root=ledger,
+        now=pd.Timestamp("2026-11-07T16:00:00", tz="Asia/Shanghai"),
+    )
+
+    benchmark = pd.DataFrame(
+        {
+            "trade_date": pd.to_datetime(["2026-11-03", "2026-11-04", "2026-11-05", "2026-11-06"]),
+            "close": [4000.0, 4010.0, 4020.0, 4030.0],
+        }
+    )
+    audit = audit_evidence_calendar(PITEvidenceStore(ledger), benchmark)
+    assert audit["status"] == "invalid_nontrading_evidence"
+    assert audit["extra_nontrading_dates"] == ["2026-11-07"]
