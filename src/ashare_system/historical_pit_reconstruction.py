@@ -3,9 +3,9 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Callable
 
 import pandas as pd
 from tenacity import retry, stop_after_attempt, wait_exponential
@@ -350,8 +350,10 @@ def normalize_szse_name_changes(frame: pd.DataFrame) -> tuple[pd.DataFrame, list
         ]
     if not old_col or not new_col:
         return pd.DataFrame(columns=columns), [
-            "SZSE name-change table lacks explicit old/new abbreviation columns; "
-            f"columns={list(frame.columns)}"
+            (
+                "SZSE name-change table lacks explicit old/new abbreviation columns; "
+                f"columns={list(frame.columns)}"
+            )
         ]
 
     result = pd.DataFrame(
@@ -462,20 +464,20 @@ def run_inventory(
         "lifecycle_symbol_counts": {
             "SSE": int(lifecycle_counts.get("SSE", 0)),
             "SZSE": int(lifecycle_counts.get("SZSE", 0)),
-            "total": int(len(lifecycle)),
+            "total": len(lifecycle),
         },
         "delisted_counts": {
             "SSE": int(delisted_counts.get("SSE", 0)),
             "SZSE": int(delisted_counts.get("SZSE", 0)),
-            "total": int(len(delisted)),
+            "total": len(delisted),
         },
         "listing_date_coverage": float(lifecycle["list_date"].notna().mean()),
         "delist_date_coverage_for_delisted": (
             float(delisted["delist_date"].notna().mean()) if len(delisted) else 1.0
         ),
-        "trading_dates_inventory": int(len(calendar)),
-        "szse_name_change_rows": int(len(sz_changes)),
-        "szse_st_transition_rows": int(len(st_transitions)),
+        "trading_dates_inventory": len(calendar),
+        "szse_name_change_rows": len(sz_changes),
+        "szse_st_transition_rows": len(st_transitions),
         "st_history": {
             "SZSE": (
                 "official_abbreviation_change_transitions"
