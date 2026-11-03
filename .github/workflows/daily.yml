@@ -9,6 +9,8 @@ on:
       - "src/ashare_system/robust_universe.py"
       - "src/ashare_system/bootstrap_universe.py"
       - "src/ashare_system/archive_security_master.py"
+      - "src/ashare_system/pit_evidence.py"
+      - "src/ashare_system/strict_pit_v2.py"
       - "src/ashare_system/enrich_daily.py"
       - "src/ashare_system/shadow_trading.py"
       - "src/ashare_system/shadow_v2.py"
@@ -146,6 +148,19 @@ jobs:
           name: security-master-snapshot-${{ github.run_id }}
           path: reports/security-master-archive/
           retention-days: 90
+      - name: Stage strict PIT universe evidence
+        run: >-
+          python -m ashare_system.pit_evidence stage
+          --cache-root data/cache
+          --candidates-file reports/universe/candidates.csv
+          --universe-manifest reports/universe/universe_manifest.json
+          --output-dir reports/pit-evidence
+      - name: Upload PIT evidence handoff
+        uses: actions/upload-artifact@v4
+        with:
+          name: daily-pit-evidence-${{ github.run_id }}
+          path: reports/pit-evidence/
+          retention-days: 14
       - name: Upload candidate handoff
         uses: actions/upload-artifact@v4
         with:
@@ -170,6 +185,11 @@ jobs:
         with:
           name: daily-universe-${{ github.run_id }}
           path: reports/universe
+      - name: Download PIT evidence handoff
+        uses: actions/download-artifact@v4
+        with:
+          name: daily-pit-evidence-${{ github.run_id }}
+          path: reports/pit-evidence
       - name: Restore market and financial caches
         uses: actions/cache@v4
         with:
@@ -205,8 +225,36 @@ jobs:
           --workers 2
           --refresh-days 7
           --stale-days 30
-      - name: Run scheduled CNY 20k shadow portfolio v2
+      - name: Check after-close evidence eligibility
+        id: evidence_clock
         if: github.ref == 'refs/heads/main' && (github.event_name == 'schedule' || github.event_name == 'workflow_dispatch')
+        shell: bash
+        run: |
+          python - <<'PY'
+          import os
+          from datetime import time
+          from zoneinfo import ZoneInfo
+
+          import pandas as pd
+
+          now = pd.Timestamp.now(tz=ZoneInfo("Asia/Shanghai"))
+          frame = pd.read_csv("reports/production/selection/selected.csv")
+          signal_date = pd.to_datetime(frame["as_of"]).max().date()
+          eligible = now.time() >= time(15, 10) and signal_date == now.date()
+          with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as handle:
+              handle.write(f"eligible={'true' if eligible else 'false'}\n")
+              handle.write(f"signal_date={signal_date.isoformat()}\n")
+              handle.write(f"china_date={now.date().isoformat()}\n")
+          print(
+              {
+                  "eligible": eligible,
+                  "signal_date": signal_date.isoformat(),
+                  "china_now": now.isoformat(),
+              }
+          )
+          PY
+      - name: Run scheduled CNY 20k shadow portfolio v2
+        if: github.ref == 'refs/heads/main' && steps.evidence_clock.outputs.eligible == 'true'
         run: >-
           python -m ashare_system.shadow_v2
           --selected-file reports/production/selection/selected.csv
@@ -216,6 +264,12 @@ jobs:
           --cache-root data/cache
           --portfolio-config config/portfolio_v2.yml
           --workers 4
+      - name: Persist staged PIT universe evidence
+        if: github.ref == 'refs/heads/main' && steps.evidence_clock.outputs.eligible == 'true'
+        run: >-
+          python -m ashare_system.pit_evidence persist
+          --staging-dir reports/pit-evidence
+          --ledger-root research/pit
       - name: Verify production outputs
         run: |
           python - <<'PY'
@@ -250,21 +304,21 @@ jobs:
           print(json.dumps(fundamental, ensure_ascii=False, indent=2))
           PY
       - name: Upload v2 shadow-ranking backup
-        if: github.ref == 'refs/heads/main' && (github.event_name == 'schedule' || github.event_name == 'workflow_dispatch')
+        if: github.ref == 'refs/heads/main' && steps.evidence_clock.outputs.eligible == 'true'
         uses: actions/upload-artifact@v4
         with:
           name: shadow-v2-ledger-${{ github.run_id }}
           path: research/shadow_v2/rankings/
           retention-days: 90
-      - name: Persist immutable v2 ranking
-        if: github.ref == 'refs/heads/main' && (github.event_name == 'schedule' || github.event_name == 'workflow_dispatch')
+      - name: Persist immutable v2 ranking and PIT evidence
+        if: github.ref == 'refs/heads/main' && steps.evidence_clock.outputs.eligible == 'true'
         shell: bash
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add research/shadow_v2/rankings/*.csv
+          git add research/shadow_v2/rankings/*.csv research/pit/
           if git diff --cached --quiet; then
-            echo "V2 ranking already persisted for this market date."
+            echo "V2 ranking and PIT evidence already persisted for this market date."
           else
             signal_date=$(python - <<'PY'
           import pandas as pd
@@ -272,7 +326,7 @@ jobs:
           print(pd.to_datetime(frame["as_of"]).max().date().isoformat())
           PY
             )
-            git commit -m "shadow-v2: lock ranking ${signal_date}"
+            git commit -m "evidence: lock v2 ranking and PIT universe ${signal_date}"
             git push origin HEAD:main
           fi
       - name: Upload research artifact
