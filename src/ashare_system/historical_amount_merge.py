@@ -88,6 +88,7 @@ def merge_shards(
 
     final_path = output / "historical_amounts_2023_2026.parquet"
     writer: pq.ParquetWriter | None = None
+    target_schema: pa.Schema | None = None
     total_rows = 0
     seen_symbols: set[str] = set()
     duplicate_symbol_shards: list[str] = []
@@ -117,13 +118,14 @@ def merge_shards(
                     raise RuntimeError(f"{path} contains null amount values")
 
             if writer is None:
+                target_schema = table.schema
                 writer = pq.ParquetWriter(
                     final_path,
-                    table.schema,
+                    target_schema,
                     compression="zstd",
                 )
-            elif table.schema != writer.schema:
-                table = table.cast(writer.schema)
+            elif target_schema is not None and table.schema != target_schema:
+                table = table.cast(target_schema)
 
             writer.write_table(table)
             total_rows += table.num_rows
