@@ -1,0 +1,70 @@
+name: ST effective-date PDF parser pilot
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - main
+    paths:
+      - "src/ashare_system/cninfo_risk_inventory.py"
+      - "src/ashare_system/st_effective_date.py"
+      - "tests/test_st_effective_date.py"
+      - "tests/test_cninfo_risk_inventory.py"
+      - "pyproject.toml"
+      - ".github/workflows/st-effective-date-pilot.yml"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: st-effective-date-pilot-${{ github.ref_name }}
+  cancel-in-progress: true
+
+jobs:
+  pilot:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+
+      - name: Install
+        run: python -m pip install -e .
+
+      - name: Run high-confidence ST effective-date parser pilot
+        run: >-
+          python -m ashare_system.st_effective_date
+          --output-dir reports/historical-pit/st-effective-pilot
+          --start 2023-01-01
+          --end 2024-12-31
+          --per-cohort 10
+          --workers 2
+
+      - name: Verify evidence grade remains reconstructed
+        run: |
+          python - <<'PY'
+          import json
+          from pathlib import Path
+
+          payload = json.loads(
+              Path(
+                  "reports/historical-pit/st-effective-pilot/summary.json"
+              ).read_text(encoding="utf-8")
+          )
+          assert payload["strict_point_in_time_evidence"] is False
+          assert payload["sample_count"] > 0
+          print(json.dumps(payload, ensure_ascii=False, indent=2))
+          PY
+
+      - name: Upload parser pilot evidence
+        uses: actions/upload-artifact@v4
+        with:
+          name: st-effective-date-pilot-${{ github.run_id }}
+          path: reports/historical-pit/st-effective-pilot/
+          retention-days: 90
