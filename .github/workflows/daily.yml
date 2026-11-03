@@ -149,12 +149,19 @@ jobs:
           path: reports/security-master-archive/
           retention-days: 90
       - name: Stage strict PIT universe evidence
-        run: >-
-          python -m ashare_system.pit_evidence stage
-          --cache-root data/cache
-          --candidates-file reports/universe/candidates.csv
-          --universe-manifest reports/universe/universe_manifest.json
-          --output-dir reports/pit-evidence
+        shell: bash
+        run: |
+          mkdir -p reports/pit-evidence
+          set +e
+          python -m ashare_system.pit_evidence stage             --cache-root data/cache             --candidates-file reports/universe/candidates.csv             --universe-manifest reports/universe/universe_manifest.json             --output-dir reports/pit-evidence             >reports/pit-evidence/stage.log 2>&1
+          status=$?
+          set -e
+          cat reports/pit-evidence/stage.log
+          if [ "$status" -ne 0 ]; then
+            echo "Strict PIT evidence unavailable for this run; production continues but this date will remain a strict-evidence gap."
+            echo "$status" > reports/pit-evidence/ineligible.exitcode
+            rm -f reports/pit-evidence/manifest.json reports/pit-evidence/master_state.csv reports/pit-evidence/candidates.csv
+          fi
       - name: Upload PIT evidence handoff
         uses: actions/upload-artifact@v4
         with:
@@ -266,10 +273,13 @@ jobs:
           --workers 4
       - name: Persist staged PIT universe evidence
         if: github.ref == 'refs/heads/main' && steps.evidence_clock.outputs.eligible == 'true'
-        run: >-
-          python -m ashare_system.pit_evidence persist
-          --staging-dir reports/pit-evidence
-          --ledger-root research/pit
+        shell: bash
+        run: |
+          if [ -f reports/pit-evidence/manifest.json ]; then
+            python -m ashare_system.pit_evidence persist               --staging-dir reports/pit-evidence               --ledger-root research/pit
+          else
+            echo "No strict PIT bundle is eligible for persistence on this market date."
+          fi
       - name: Verify production outputs
         run: |
           python - <<'PY'
