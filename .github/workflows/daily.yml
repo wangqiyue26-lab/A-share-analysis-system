@@ -188,6 +188,7 @@ jobs:
           ashare-daily
           --candidates-file reports/universe/candidates.csv
           --top 10
+          --factor-config config/factors_v2.yml
           --history-days 420
           --workers 4
           --adjust ""
