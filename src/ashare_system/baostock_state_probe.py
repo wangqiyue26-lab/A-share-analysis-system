@@ -44,7 +44,7 @@ def _filter_a_share_codes(frame: pd.DataFrame) -> pd.DataFrame:
     result["code"] = result["code"].astype(str)
     mask = (
         result["code"].str.match(r"^sh\.6\d{5}$", na=False)
-        | result["code"].str.match(r"^sz\.[03]\d{5}$", na=False)
+        | result["code"].str.match(r"^sz\.(?:00[0-3]|30[01])\d{3}$", na=False)
     )
     return result[mask].copy()
 
