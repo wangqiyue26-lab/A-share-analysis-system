@@ -59,7 +59,7 @@ def test_lifecycle_combines_current_and_official_delisted_membership():
     lifecycle = build_lifecycle(_bundle())
     assert set(lifecycle["symbol"]) == {"600000", "600001", "000001", "000002"}
     ended = lifecycle.set_index("symbol")
-    assert ended.loc["600001", "currently_listed"] == False  # noqa: E712
+    assert not bool(ended.loc["600001", "currently_listed"])
     assert ended.loc["600001", "board"] == "上证主板"
     assert ended.loc["000002", "board"] == "深证主板"
 
@@ -85,10 +85,10 @@ def test_szse_name_changes_extract_st_transitions_without_inventing_dates():
     assert warnings == []
     transitions = normalized[normalized["st_transition"]]
     assert len(transitions) == 2
-    assert transitions.iloc[0]["is_st_before"] == False  # noqa: E712
-    assert transitions.iloc[0]["is_st_after"] == True  # noqa: E712
-    assert transitions.iloc[1]["is_st_before"] == True  # noqa: E712
-    assert transitions.iloc[1]["is_st_after"] == False  # noqa: E712
+    assert not bool(transitions.iloc[0]["is_st_before"])
+    assert bool(transitions.iloc[0]["is_st_after"])
+    assert bool(transitions.iloc[1]["is_st_before"])
+    assert not bool(transitions.iloc[1]["is_st_after"])
 
 
 def test_szse_name_change_parser_fails_closed_when_old_new_names_missing():
