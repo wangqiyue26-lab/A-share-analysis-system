@@ -7,6 +7,8 @@ import pandas as pd
 
 from .config import load_yaml
 
+ETF20_SYMBOLS = {"159915", "588000"}
+
 
 @dataclass(frozen=True)
 class CapitalAwarePortfolioConfig:
@@ -342,7 +344,7 @@ def etf_rotation_signals(
                     "trade_date": raw_date,
                     "symbol": previous_etf,
                     "target_weight": 0.0,
-                    "board": "ETF",
+                    "board": "ETF20" if previous_etf in ETF20_SYMBOLS else "ETF10",
                     "is_st": False,
                     "instrument_type": "etf",
                     "source_rank": pd.NA,
@@ -354,7 +356,7 @@ def etf_rotation_signals(
                     "trade_date": raw_date,
                     "symbol": chosen,
                     "target_weight": desired,
-                    "board": "ETF",
+                    "board": "ETF20" if chosen in ETF20_SYMBOLS else "ETF10",
                     "is_st": False,
                     "instrument_type": "etf",
                     "source_rank": 1,
