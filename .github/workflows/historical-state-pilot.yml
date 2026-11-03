@@ -1,0 +1,146 @@
+name: Historical state archive pilot
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - main
+    paths:
+      - "src/ashare_system/baostock_state_archive.py"
+      - "tests/test_baostock_state_archive.py"
+      - ".github/workflows/historical-state-pilot.yml"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: historical-state-pilot-${{ github.ref_name }}
+  cancel-in-progress: true
+
+jobs:
+  archive-pilot:
+    strategy:
+      fail-fast: false
+      max-parallel: 2
+      matrix:
+        shard: [0, 1, 2, 3]
+    runs-on: ubuntu-latest
+    timeout-minutes: 75
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+
+      - name: Install
+        run: python -m pip install -e .
+
+      - name: Download fixed validated lifecycle artifact
+        uses: actions/download-artifact@v4
+        with:
+          pattern: historical-pit-lifecycle-*
+          path: reports/historical-state-pilot/lifecycle
+          merge-multiple: true
+          github-token: ${{ github.token }}
+          run-id: 41625117222
+
+      - name: Archive state shard
+        run: >-
+          python -m ashare_system.baostock_state_archive shard
+          --lifecycle-file reports/historical-state-pilot/lifecycle/lifecycle.csv
+          --output-dir "reports/historical-state-pilot/shard-${{ matrix.shard }}"
+          --period-start 2023-01-03
+          --period-end 2026-11-03
+          --shard-count 32
+          --shard-index "${{ matrix.shard }}"
+
+      - name: Enforce state shard gate
+        shell: bash
+        run: |
+          python - <<'PY'
+          import json
+          from pathlib import Path
+
+          shard = "${{ matrix.shard }}"
+          payload = json.loads(
+              Path(
+                  f"reports/historical-state-pilot/shard-{shard}/summary.json"
+              ).read_text(encoding="utf-8")
+          )
+          assert payload["success_rate"] >= 0.95, payload
+          assert payload["period_start"] == "2023-01-03"
+          assert payload["period_end"] == "2026-11-03"
+          print(json.dumps(payload, ensure_ascii=False, indent=2))
+          PY
+
+      - name: Upload state pilot shard
+        uses: actions/upload-artifact@v4
+        with:
+          name: historical-state-pilot-shard-${{ matrix.shard }}-${{ github.run_id }}
+          path: reports/historical-state-pilot/shard-${{ matrix.shard }}/
+          retention-days: 30
+
+  assess:
+    needs: archive-pilot
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download state pilot shards
+        uses: actions/download-artifact@v4
+        with:
+          pattern: historical-state-pilot-shard-*-${{ github.run_id }}
+          path: reports/historical-state-pilot/downloaded
+          merge-multiple: false
+
+      - name: Assess state archive scale gate
+        run: |
+          python - <<'PY'
+          import json
+          from pathlib import Path
+
+          summaries = [
+              json.loads(path.read_text(encoding="utf-8"))
+              for path in sorted(
+                  Path("reports/historical-state-pilot/downloaded").glob("*/summary.json")
+              )
+          ]
+          if len(summaries) != 4:
+              raise SystemExit(f"Expected 4 state pilot summaries, got {len(summaries)}")
+          total = sum(int(item["symbol_count"]) for item in summaries)
+          success = sum(int(item["success_count"]) for item in summaries)
+          rows = sum(int(item["state_row_count"]) for item in summaries)
+          rate = success / total if total else 0.0
+          payload = {
+              "status": "complete",
+              "pilot_shards": 4,
+              "full_shard_count": 32,
+              "symbol_count": total,
+              "success_count": success,
+              "success_rate": rate,
+              "state_row_count": rows,
+              "full_state_archive_gate": (
+                  "pass"
+                  if rate >= 0.95
+                  and all(bool(item["shard_gate_passed"]) for item in summaries)
+                  else "fail"
+              ),
+              "strict_point_in_time_evidence": False,
+          }
+          output = Path("reports/historical-state-pilot")
+          output.mkdir(parents=True, exist_ok=True)
+          (output / "assessment.json").write_text(
+              json.dumps(payload, ensure_ascii=False, indent=2) + "\n",
+              encoding="utf-8",
+          )
+          print(json.dumps(payload, ensure_ascii=False, indent=2))
+          PY
+
+      - name: Upload state pilot assessment
+        uses: actions/upload-artifact@v4
+        with:
+          name: historical-state-pilot-assessment-${{ github.run_id }}
+          path: reports/historical-state-pilot/assessment.json
+          retention-days: 90
