@@ -1,0 +1,53 @@
+version: 2
+
+account:
+  initial_cash: 20000
+  slippage_bps: 5
+
+costs:
+  stock:
+    commission_flat_cny: 5.0
+    commission_threshold_cny: 10000.0
+    commission_excess_rate: 0.000086
+    transfer_fee_rate: 0.00001
+    sell_stamp_duty_rate: 0.0005
+  etf:
+    commission_flat_cny: 5.0
+    commission_threshold_cny: 10000.0
+    commission_excess_rate: 0.000086
+    transfer_fee_rate: 0.0
+    sell_stamp_duty_rate: 0.0
+
+portfolio:
+  max_stock_positions: 3
+  stock_weight_per_position: 0.25
+  max_total_stock_weight: 0.75
+  min_cash_weight: 0.10
+  entry_rank_max: 5
+  keep_rank_max: 10
+  rebalance_every_trading_days: 5
+  minimum_holding_trading_days: 5
+  affordability_buffer_rate: 0.002
+
+etf_sleeve:
+  enabled: true
+  target_weight: 0.15
+  max_weight_if_stock_slots_unused: 0.40
+  require_positive_momentum_20: true
+  require_close_above_ma60: true
+  pool:
+    - symbol: "510300"
+      name: 沪深300ETF
+    - symbol: "510500"
+      name: 中证500ETF
+    - symbol: "159915"
+      name: 创业板ETF
+    - symbol: "588000"
+      name: 科创50ETF
+
+validation:
+  block_trading_days: 20
+  rebalance_trading_days: 5
+  minimum_blocks_for_decision: 12
+  development_only_when_historical_universe_is_reconstructed: true
+  forward_shadow_is_final_gate: true
