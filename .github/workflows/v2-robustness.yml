@@ -1,0 +1,154 @@
+name: V2 robustness suite
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - main
+    paths:
+      - "config/portfolio_v2.yml"
+      - "config/factors_v2.yml"
+      - "src/ashare_system/capital_aware.py"
+      - "src/ashare_system/rolling_validation.py"
+      - "src/ashare_system/experiment_v2.py"
+      - "src/ashare_system/backtest/**"
+      - "src/ashare_system/factors/**"
+      - ".github/workflows/v2-robustness.yml"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: v2-robustness-${{ github.ref_name }}
+  cancel-in-progress: true
+
+jobs:
+  robustness:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+
+      - name: Restore research caches
+        uses: actions/cache@v4
+        with:
+          path: |
+            data/cache/security_master
+            data/cache/candidate_universe
+            data/cache/bars_raw
+            data/cache/etf_bars_raw
+          key: ashare-v2-robustness-${{ runner.os }}-${{ github.run_id }}
+          restore-keys: |
+            ashare-v2-robustness-${{ runner.os }}-
+            ashare-v2-validation-${{ runner.os }}-
+            ashare-research-cache-${{ runner.os }}-
+            ashare-universe-${{ runner.os }}-
+
+      - name: Install
+        run: python -m pip install -e .
+
+      - name: Prepare one frozen 60-name universe for all scenarios
+        run: >-
+          python -m ashare_system.robust_universe
+          --candidate-limit 60
+          --allowed-exchanges SSE,SZSE
+          --min-spot-coverage 0.80
+          --output-root reports/v2-robustness-universe
+          --cache-root data/cache
+
+      - name: Run baseline and execution-stress scenarios
+        shell: bash
+        run: |
+          set -euo pipefail
+          end_date=$(python - <<'PY'
+          import pandas as pd
+          from zoneinfo import ZoneInfo
+          print(pd.Timestamp.now(tz=ZoneInfo("Asia/Shanghai")).date().isoformat())
+          PY
+          )
+
+          for slip in 5 10 20; do
+            python -m ashare_system.experiment_v2               --candidates-file reports/v2-robustness-universe/candidates.csv               --start 2025-01-02               --end "$end_date"               --output-dir "reports/v2-robustness/slippage_${slip}bps"               --cache-root data/cache               --portfolio-config config/portfolio_v2.yml               --factor-config config/factors_v2.yml               --workers 4               --block-days 20               --slippage-bps "$slip"               --experiment-label "2025plus_slippage_${slip}bps"
+          done
+
+      - name: Run untouched pre-2025 temporal holdout
+        run: >-
+          python -m ashare_system.experiment_v2
+          --candidates-file reports/v2-robustness-universe/candidates.csv
+          --start 2023-01-03
+          --end 2024-12-31
+          --output-dir reports/v2-robustness/pre2025_holdout
+          --cache-root data/cache
+          --portfolio-config config/portfolio_v2.yml
+          --factor-config config/factors_v2.yml
+          --workers 4
+          --block-days 20
+          --slippage-bps 5
+          --experiment-label pre2025_temporal_holdout_current_universe
+
+      - name: Build robustness comparison
+        run: |
+          python - <<'PY'
+          import json
+          from pathlib import Path
+
+          root = Path("reports/v2-robustness")
+          scenarios = {}
+          for path in sorted(root.glob("*/summary.json")):
+              payload = json.loads(path.read_text(encoding="utf-8"))
+              scenarios[path.parent.name] = {
+                  "experiment_label": payload["experiment_label"],
+                  "start": payload["start"],
+                  "end": payload["end"],
+                  "slippage_bps": payload["slippage_bps"],
+                  "total_return": payload["total_return"],
+                  "max_drawdown": payload["max_drawdown"],
+                  "development_gate_passed": payload["development_gate_passed"],
+                  "rolling": payload["rolling"],
+              }
+
+          baseline = scenarios["slippage_5bps"]
+          stress = {}
+          for name in ("slippage_10bps", "slippage_20bps"):
+              stress[name] = {
+                  "return_delta_vs_5bps": (
+                      scenarios[name]["total_return"] - baseline["total_return"]
+                  ),
+                  "median_excess_delta_vs_5bps": (
+                      scenarios[name]["rolling"]["median_excess_return"]
+                      - baseline["rolling"]["median_excess_return"]
+                  ),
+              }
+
+          output = {
+              "strategy_version": "capital-aware-v2",
+              "purpose": (
+                  "Robustness diagnostics only. This suite does not optimize parameters "
+                  "and does not establish strict PIT investability."
+              ),
+              "current_universe_bias": True,
+              "scenarios": scenarios,
+              "stress_vs_baseline": stress,
+          }
+          (root / "robustness_summary.json").write_text(
+              json.dumps(output, ensure_ascii=False, indent=2) + "\n",
+              encoding="utf-8",
+          )
+          print(json.dumps(output, ensure_ascii=False, indent=2))
+          PY
+
+      - name: Upload robustness artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: v2-robustness-${{ github.run_id }}
+          path: |
+            reports/v2-robustness/
+            reports/v2-robustness-universe/
+          retention-days: 30

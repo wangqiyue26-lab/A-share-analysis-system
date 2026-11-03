@@ -125,6 +125,8 @@ def run_experiment(
     portfolio_config: str | Path = "config/portfolio_v2.yml",
     workers: int = 4,
     block_days: int = 20,
+    slippage_bps: float = 5.0,
+    experiment_label: str = "development",
 ) -> dict[str, object]:
     candidates = pd.read_csv(candidates_file, dtype={"symbol": str})
     candidates["symbol"] = candidates["symbol"].astype(str).str.zfill(6)
@@ -186,7 +188,7 @@ def run_experiment(
             engine_bars[symbol] = trimmed
 
     result = BacktestEngine(
-        rules=TradingRuleSet.personal_account_v2(slippage_bps=5.0),
+        rules=TradingRuleSet.personal_account_v2(slippage_bps=slippage_bps),
         initial_cash=portfolio.initial_cash,
     ).run(engine_bars, signals)
 
@@ -211,6 +213,7 @@ def run_experiment(
 
     payload: dict[str, object] = {
         "strategy_version": "capital-aware-v2",
+        "experiment_label": experiment_label,
         "research_grade": "development_only_current_universe",
         "strict_point_in_time_universe": False,
         "warning": (
@@ -221,6 +224,7 @@ def run_experiment(
         "end": end_ts.date().isoformat(),
         "initial_cash": portfolio.initial_cash,
         "cost_profile": "stock_actual_plus_etf_0p5bp_min_0p5",
+        "slippage_bps": float(slippage_bps),
         "candidate_count": len(candidates),
         "history_count": len(bars),
         "ranking_dates": len(rankings),
@@ -250,6 +254,8 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--portfolio-config", default="config/portfolio_v2.yml")
     parser.add_argument("--workers", type=int, default=4)
     parser.add_argument("--block-days", type=int, default=20)
+    parser.add_argument("--slippage-bps", type=float, default=5.0)
+    parser.add_argument("--experiment-label", default="development")
     return parser
 
 
@@ -265,6 +271,8 @@ def main() -> int:
         portfolio_config=args.portfolio_config,
         workers=args.workers,
         block_days=args.block_days,
+        slippage_bps=args.slippage_bps,
+        experiment_label=args.experiment_label,
     )
     print(json.dumps(payload, ensure_ascii=False, indent=2))
     return 0

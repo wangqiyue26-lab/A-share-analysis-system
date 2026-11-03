@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import math
 from dataclasses import dataclass
 
 import pandas as pd
@@ -17,6 +18,10 @@ class RollingValidationSummary:
     benchmark_outperformance_rate: float | None
     median_excess_return: float | None
     worst_block_return: float
+    best_block_return: float
+    return_excluding_best_block: float
+    top_1_log_return_share: float | None
+    top_2_log_return_share: float | None
 
     def as_dict(self) -> dict[str, object]:
         return {
@@ -30,6 +35,10 @@ class RollingValidationSummary:
             "benchmark_outperformance_rate": self.benchmark_outperformance_rate,
             "median_excess_return": self.median_excess_return,
             "worst_block_return": self.worst_block_return,
+            "best_block_return": self.best_block_return,
+            "return_excluding_best_block": self.return_excluding_best_block,
+            "top_1_log_return_share": self.top_1_log_return_share,
+            "top_2_log_return_share": self.top_2_log_return_share,
         }
 
 
@@ -193,6 +202,22 @@ def evaluate_rolling_blocks(
         if benchmark_ready.any()
         else None
     )
+    ordered_returns = frame["return"].sort_values(ascending=False).reset_index(drop=True)
+    best_block_return = float(ordered_returns.iloc[0])
+    return_excluding_best = float(
+        (1.0 + ordered_returns.iloc[1:]).prod() - 1.0
+        if len(ordered_returns) > 1
+        else 0.0
+    )
+    log_returns = [math.log1p(float(value)) for value in ordered_returns if float(value) > -1.0]
+    total_log_return = sum(log_returns)
+    if total_log_return > 0 and log_returns:
+        top_1_log_share = float(log_returns[0] / total_log_return)
+        top_2_log_share = float(sum(log_returns[:2]) / total_log_return)
+    else:
+        top_1_log_share = None
+        top_2_log_share = None
+
     summary = RollingValidationSummary(
         block_days=block_days,
         block_count=len(frame),
@@ -204,6 +229,10 @@ def evaluate_rolling_blocks(
         benchmark_outperformance_rate=benchmark_outperformance_rate,
         median_excess_return=median_excess,
         worst_block_return=float(frame["return"].min()),
+        best_block_return=best_block_return,
+        return_excluding_best_block=return_excluding_best,
+        top_1_log_return_share=top_1_log_share,
+        top_2_log_return_share=top_2_log_share,
     )
     return frame, summary
 
