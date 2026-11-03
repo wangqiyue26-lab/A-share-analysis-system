@@ -51,7 +51,7 @@ def _candidates():
     )
 
 
-def _stage(tmp_path, monkeypatch, date="2026-11-03"):
+def _stage(tmp_path, date="2026-11-03"):
     cache = tmp_path / "cache"
     from ashare_system.data.security_master import SecurityMasterSnapshotStore
 
@@ -68,6 +68,7 @@ def _stage(tmp_path, monkeypatch, date="2026-11-03"):
                 "spot_coverage": 0.99,
                 "listing_age_verified": True,
                 "security_master_source": "akshare_exchange_security_master",
+                "security_master_observed_at": "2026-11-03T08:30:00+00:00",
             }
         ),
         encoding="utf-8",
@@ -82,8 +83,8 @@ def _stage(tmp_path, monkeypatch, date="2026-11-03"):
     return output
 
 
-def test_pit_evidence_persists_idempotently_and_loads_exact_candidates(tmp_path, monkeypatch):
-    stage = _stage(tmp_path, monkeypatch)
+def test_pit_evidence_persists_idempotently_and_loads_exact_candidates(tmp_path):
+    stage = _stage(tmp_path)
     ledger = tmp_path / "ledger"
     now = pd.Timestamp("2026-11-03T16:00:00", tz="Asia/Shanghai")
 
@@ -107,8 +108,8 @@ def test_pit_evidence_persists_idempotently_and_loads_exact_candidates(tmp_path,
     assert frame["symbol"].tolist() == ["000001", "000002"]
 
 
-def test_pit_evidence_market_clock_blocks_intraday_or_wrong_day(tmp_path, monkeypatch):
-    stage = _stage(tmp_path, monkeypatch)
+def test_pit_evidence_market_clock_blocks_intraday_or_wrong_day(tmp_path):
+    stage = _stage(tmp_path)
     ledger = tmp_path / "ledger"
 
     intraday = persist_staged_evidence(
@@ -127,8 +128,8 @@ def test_pit_evidence_market_clock_blocks_intraday_or_wrong_day(tmp_path, monkey
     assert not (ledger / "days").exists()
 
 
-def test_pit_candidate_day_cannot_be_rewritten(tmp_path, monkeypatch):
-    stage = _stage(tmp_path, monkeypatch)
+def test_pit_candidate_day_cannot_be_rewritten(tmp_path):
+    stage = _stage(tmp_path)
     ledger = tmp_path / "ledger"
     now = pd.Timestamp("2026-11-03T16:00:00", tz="Asia/Shanghai")
     persist_staged_evidence(staging_dir=stage, ledger_root=ledger, now=now)
@@ -148,8 +149,8 @@ def test_pit_candidate_day_cannot_be_rewritten(tmp_path, monkeypatch):
         persist_staged_evidence(staging_dir=stage, ledger_root=ledger, now=now)
 
 
-def test_master_state_is_deduplicated_across_days(tmp_path, monkeypatch):
-    stage = _stage(tmp_path, monkeypatch)
+def test_master_state_is_deduplicated_across_days(tmp_path):
+    stage = _stage(tmp_path)
     ledger = tmp_path / "ledger"
     first = persist_staged_evidence(
         staging_dir=stage,
@@ -171,8 +172,8 @@ def test_master_state_is_deduplicated_across_days(tmp_path, monkeypatch):
     assert len(list((ledger / "security_master" / "states").glob("*.csv"))) == 1
 
 
-def test_load_master_as_of_refuses_future_substitution(tmp_path, monkeypatch):
-    stage = _stage(tmp_path, monkeypatch)
+def test_load_master_as_of_refuses_future_substitution(tmp_path):
+    stage = _stage(tmp_path)
     ledger = tmp_path / "ledger"
     persist_staged_evidence(
         staging_dir=stage,
@@ -186,8 +187,8 @@ def test_load_master_as_of_refuses_future_substitution(tmp_path, monkeypatch):
     assert set(master["symbol"]) == {"000001", "000002", "600000"}
 
 
-def test_strict_calendar_audit_detects_missing_trading_day(tmp_path, monkeypatch):
-    stage = _stage(tmp_path, monkeypatch)
+def test_strict_calendar_audit_detects_missing_trading_day(tmp_path):
+    stage = _stage(tmp_path)
     ledger = tmp_path / "ledger"
     persist_staged_evidence(
         staging_dir=stage,
