@@ -45,6 +45,8 @@ def capture_ranking(
         "rank",
         "composite_score",
         "close",
+        "momentum_20",
+        "trend_close_ma20",
     }
     missing = sorted(required - set(selected.columns))
     if missing:
@@ -76,6 +78,8 @@ def capture_ranking(
         "rank",
         "composite_score",
         "close",
+        "momentum_20",
+        "trend_close_ma20",
         "screen_source",
         "strategy_version",
         "observed_at",
