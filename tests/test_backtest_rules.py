@@ -84,3 +84,9 @@ def test_equity_etf_uses_broker_commission_without_stock_taxes():
     assert cost.commission == pytest.approx(5.0)
     assert cost.stamp_duty == 0.0
     assert cost.transfer_fee == 0.0
+
+
+def test_etf_price_limit_classes():
+    rules = TradingRuleSet()
+    assert rules.price_limit_pct(trade_date="2026-11-03", board="ETF10") == pytest.approx(0.10)
+    assert rules.price_limit_pct(trade_date="2026-11-03", board="ETF20") == pytest.approx(0.20)
