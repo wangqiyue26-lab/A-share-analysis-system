@@ -15,7 +15,7 @@ from .capital_aware import (
     load_capital_aware_config,
 )
 from .data.benchmark import AkshareBenchmarkProvider
-from .factors import FactorEngine, FactorRunResult, load_factor_config
+from .factors import FactorEngine, load_factor_config
 from .production import _fetch_one_history
 from .rolling_validation import evaluate_rolling_blocks, pass_development_gate
 from .shadow_v2 import _fetch_etf_bars
