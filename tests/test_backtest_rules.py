@@ -72,18 +72,28 @@ def test_personal_v2_commission_charges_only_excess_above_ten_thousand():
     assert cost.commission == pytest.approx(5.86)
 
 
-def test_equity_etf_uses_broker_commission_without_stock_taxes():
+def test_equity_etf_uses_actual_low_commission_without_stock_taxes():
     rules = TradingRuleSet.personal_account_v2(slippage_bps=0)
-    cost = trade_cost(
+    small = trade_cost(
         notional=8_000.0,
         side="sell",
         trade_date="2026-11-02",
         rules=rules,
         instrument_type="etf",
     )
-    assert cost.commission == pytest.approx(5.0)
-    assert cost.stamp_duty == 0.0
-    assert cost.transfer_fee == 0.0
+    large = trade_cost(
+        notional=20_000.0,
+        side="buy",
+        trade_date="2026-11-02",
+        rules=rules,
+        instrument_type="etf",
+    )
+    assert small.commission == pytest.approx(0.5)
+    assert large.commission == pytest.approx(1.0)
+    assert small.stamp_duty == 0.0
+    assert small.transfer_fee == 0.0
+    assert large.stamp_duty == 0.0
+    assert large.transfer_fee == 0.0
 
 
 def test_etf_price_limit_classes():

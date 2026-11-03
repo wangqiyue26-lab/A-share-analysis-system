@@ -29,7 +29,15 @@ Stock transaction costs follow the user's observed broker schedule:
 - stock sell stamp duty: 0.05%;
 - simulated slippage: 5 bps each side.
 
-ETF trades use the same broker commission schedule in the current model, but stock stamp duty and stock transfer fee are not applied. This ETF fee assumption should be replaced with the user's own ETF contract note when available.
+ETF transaction costs use the user's actual account schedule:
+
+- commission rate: 0.005% (0.5 basis points / 万0.5) on both buys and sells;
+- minimum commission: CNY 0.50 per order;
+- no stamp duty;
+- no transfer fee;
+- no other modeled explicit ETF fee.
+
+The execution engine still applies the configured slippage assumption separately, because slippage is a market-execution assumption rather than a broker fee.
 
 ## v2 factor model
 
@@ -128,3 +136,27 @@ A new strategy change receives a new strategy version. Do not repeatedly tune v2
 - v2 real_money_ready: always false in Phase 4I.
 
 The purpose of v2 is to build a strategy that survives repeated historical 20-day windows and then demonstrates the same behavior in new forward data.
+
+
+## Quant research governance and overfitting controls
+
+The first full v2 historical run is now considered a **development baseline**, not an untouched holdout. Once a result has been inspected, the same sample cannot later be relabelled as independent evidence.
+
+Future strategy work follows these rules:
+
+1. **Hypothesis before result** — every material change must state the problem it is intended to solve before the backtest is inspected.
+2. **Versioned strategy** — changes to factors, portfolio construction, risk rules or execution assumptions create an explicit strategy/cost-model version. Historical artifacts are not overwritten.
+3. **Development windows** — repeated 20-trading-day blocks are used to reject weak ideas quickly. A single strong block never justifies promotion.
+4. **No repeated holdout tuning** — once a reserved evaluation period has been inspected, it becomes development evidence and cannot be reused as a pristine holdout.
+5. **Walk-forward preference** — strict research should train/calibrate using information available before each test segment and evaluate on subsequent segments.
+6. **Parameter robustness** — a candidate should not work only at one exact parameter point. Neighboring holding periods, rank buffers and risk thresholds must show qualitatively similar behavior.
+7. **Multiple metrics** — promotion requires benchmark-relative return, drawdown, turnover, explicit costs, slippage and consistency across market regimes; absolute return alone is insufficient.
+8. **Cost stress** — results should be retested with less favorable slippage/cost assumptions. A strategy whose edge disappears under small execution changes is not robust.
+9. **Forward shadow remains final** — historical development can accelerate iteration but cannot replace the independent CNY 20k forward ledger.
+10. **Real-money flag stays false** — no historical optimization result can set real_money_ready to true by itself.
+
+The long-term target is a nested process:
+
+development -> frozen candidate -> strict PIT/walk-forward validation -> forward shadow -> readiness review.
+
+This process deliberately trades some apparent backtest performance for higher confidence that any surviving edge is not an artifact of repeated tuning.

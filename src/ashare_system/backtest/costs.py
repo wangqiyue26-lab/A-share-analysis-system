@@ -29,22 +29,25 @@ def trade_cost(
     if notional == 0:
         return TradeCost(commission=0.0, stamp_duty=0.0, transfer_fee=0.0)
 
-    if rules.commission_threshold_cny is not None and rules.commission_excess_rate is not None:
-        threshold = float(rules.commission_threshold_cny)
-        if notional <= threshold:
-            commission = float(rules.minimum_commission_cny)
-        else:
-            commission = float(rules.minimum_commission_cny) + (
-                notional - threshold
-            ) * float(rules.commission_excess_rate)
-    else:
-        commission = max(notional * rules.commission_rate, rules.minimum_commission_cny)
-
     normalized_type = instrument_type.strip().lower()
     if normalized_type == "etf":
+        commission = max(
+            notional * rules.etf_commission_rate,
+            rules.etf_minimum_commission_cny,
+        )
         stamp = 0.0
         transfer = 0.0
     else:
+        if rules.commission_threshold_cny is not None and rules.commission_excess_rate is not None:
+            threshold = float(rules.commission_threshold_cny)
+            if notional <= threshold:
+                commission = float(rules.minimum_commission_cny)
+            else:
+                commission = float(rules.minimum_commission_cny) + (
+                    notional - threshold
+                ) * float(rules.commission_excess_rate)
+        else:
+            commission = max(notional * rules.commission_rate, rules.minimum_commission_cny)
         stamp = notional * rules.stamp_duty_rate(trade_date, side)
         transfer = notional * rules.transfer_fee_rate_stock
 

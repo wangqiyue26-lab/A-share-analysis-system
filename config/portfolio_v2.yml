@@ -12,9 +12,8 @@ costs:
     transfer_fee_rate: 0.00001
     sell_stamp_duty_rate: 0.0005
   etf:
-    commission_flat_cny: 5.0
-    commission_threshold_cny: 10000.0
-    commission_excess_rate: 0.000086
+    commission_rate: 0.00005
+    minimum_commission_cny: 0.5
     transfer_fee_rate: 0.0
     sell_stamp_duty_rate: 0.0
 
