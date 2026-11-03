@@ -158,3 +158,35 @@ def test_suspended_state_may_have_missing_close_but_tradable_state_may_not():
     tradable["trade_status"] = True
     with pytest.raises(ValueError, match="tradable rows without a positive close"):
         normalize_states(tradable)
+
+
+def test_missing_amount_for_tradable_non_st_name_fails_closed():
+    lifecycle = normalize_lifecycle(_lifecycle())
+    amounts = normalize_amounts(_amounts().query("symbol != '600000'"))
+    states = normalize_states(_states())
+    with pytest.raises(RuntimeError, match="Amount archive is incomplete"):
+        reconstruct_candidate_day(
+            date="2024-05-09",
+            lifecycle=lifecycle,
+            amount_rows=amounts,
+            state_rows=states,
+            limit=2,
+        )
+
+
+def test_missing_amount_for_suspended_or_st_name_does_not_bias_ranking():
+    lifecycle = normalize_lifecycle(_lifecycle())
+    amounts = normalize_amounts(
+        _amounts().query("symbol not in ['000002', '600001']")
+    )
+    states = normalize_states(_states())
+    selected, audit = reconstruct_candidate_day(
+        date="2024-05-09",
+        lifecycle=lifecycle,
+        amount_rows=amounts,
+        state_rows=states,
+        limit=2,
+    )
+    assert selected["symbol"].tolist() == ["000001", "600000"]
+    assert audit["missing_amount_count"] == 2
+    assert audit["missing_rankable_amount_count"] == 0

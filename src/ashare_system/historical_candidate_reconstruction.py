@@ -170,6 +170,23 @@ def reconstruct_candidate_day(
             f"{len(missing_state)} of {len(member_symbols)} eligible members missing"
         )
 
+    # Missing amount for a suspended or ST security cannot affect the Top60.
+    # Missing amount for an otherwise tradable non-ST security *can*: it might
+    # have outranked every observed candidate. Never silently drop that name.
+    rankable_states = states[
+        states["symbol"].isin(member_symbols)
+        & ~states["is_st"]
+        & states["trade_status"]
+        & states["close"].gt(0)
+    ]
+    missing_rankable_amount = sorted(set(rankable_states["symbol"]) - amount_symbols)
+    if missing_rankable_amount:
+        raise RuntimeError(
+            f"Amount archive is incomplete on {target.date()}: "
+            f"{len(missing_rankable_amount)} tradable non-ST members missing amount; "
+            f"examples={missing_rankable_amount[:10]}"
+        )
+
     merged = members.merge(
         amounts,
         on="symbol",
@@ -217,6 +234,7 @@ def reconstruct_candidate_day(
         "amount_coverage": amount_coverage,
         "state_coverage": state_coverage,
         "missing_amount_count": len(missing_amount),
+        "missing_rankable_amount_count": len(missing_rankable_amount),
         "missing_state_count": len(missing_state),
         "liquid_non_st_tradable_count": len(eligible),
         "candidate_count": len(selected),
