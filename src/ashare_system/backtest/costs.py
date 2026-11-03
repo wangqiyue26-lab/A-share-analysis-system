@@ -49,9 +49,9 @@ def trade_cost(
         transfer = notional * rules.transfer_fee_rate_stock
 
     return TradeCost(
-        commission=float(commission),
-        stamp_duty=float(stamp),
-        transfer_fee=float(transfer),
+        commission=round(float(commission) + 1e-12, 2),
+        stamp_duty=round(float(stamp) + 1e-12, 2),
+        transfer_fee=round(float(transfer) + 1e-12, 2),
     )
 
 
