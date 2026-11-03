@@ -220,6 +220,7 @@ def run_experiment(
         "start": start_ts.date().isoformat(),
         "end": end_ts.date().isoformat(),
         "initial_cash": portfolio.initial_cash,
+        "cost_profile": "stock_actual_plus_etf_0p5bp_min_0p5",
         "candidate_count": len(candidates),
         "history_count": len(bars),
         "ranking_dates": len(rankings),
