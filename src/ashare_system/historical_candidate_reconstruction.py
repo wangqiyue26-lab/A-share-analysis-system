@@ -88,8 +88,13 @@ def normalize_states(frame: pd.DataFrame) -> pd.DataFrame:
         name="trade_status",
     )
     result["close"] = pd.to_numeric(result["close"], errors="coerce")
-    if result[["trade_date", "close"]].isna().any().any():
-        raise ValueError("state archive contains invalid trade_date or close")
+    if result["trade_date"].isna().any():
+        raise ValueError("state archive contains invalid trade_date")
+    invalid_tradable_close = result["trade_status"] & (~result["close"].gt(0))
+    if invalid_tradable_close.any():
+        raise ValueError(
+            "state archive contains tradable rows without a positive close"
+        )
     if result.duplicated(["trade_date", "symbol"]).any():
         raise ValueError("state archive contains duplicate symbol/date rows")
     return result.sort_values(["trade_date", "symbol"]).reset_index(drop=True)
