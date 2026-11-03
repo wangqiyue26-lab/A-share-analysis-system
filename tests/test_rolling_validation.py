@@ -41,6 +41,11 @@ def test_rolling_validation_builds_complete_twenty_day_blocks():
     assert summary.median_return > 0
     assert summary.median_excess_return > 0
     assert summary.benchmark_outperformance_rate == pytest.approx(1.0)
+    assert summary.best_block_return > 0
+    assert summary.return_excluding_best_block > 0
+    assert summary.top_1_log_return_share is not None
+    assert summary.top_2_log_return_share is not None
+    assert 0 < summary.top_1_log_return_share <= summary.top_2_log_return_share
     assert blocks["trade_count"].sum() == 2
 
 
