@@ -1,6 +1,6 @@
 import pandas as pd
 
-from ashare_system.historical_amount_archive import shard_for_symbol, select_shard
+from ashare_system.historical_amount_archive import select_shard, shard_for_symbol
 
 
 def test_shard_assignment_is_deterministic_and_bounded():
