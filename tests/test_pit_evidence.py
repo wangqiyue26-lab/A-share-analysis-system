@@ -265,6 +265,7 @@ def test_strict_calendar_audit_rejects_nontrading_evidence_date(tmp_path):
         staging_dir=stage,
         ledger_root=ledger,
         now=pd.Timestamp("2026-11-07T16:00:00", tz="Asia/Shanghai"),
+        market_close_guard=False,  # Inject invalid evidence to test downstream audit.
     )
 
     benchmark = pd.DataFrame(
