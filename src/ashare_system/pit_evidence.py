@@ -5,15 +5,13 @@ import hashlib
 import json
 import shutil
 from dataclasses import dataclass
-from datetime import time
 from pathlib import Path
-from zoneinfo import ZoneInfo
 
 import pandas as pd
 
+from .after_close_clock import evaluate_after_close
 from .data.security_master import SecurityMasterSnapshotStore, validate_security_master
 
-CHINA_TZ = ZoneInfo("Asia/Shanghai")
 MASTER_STATE_COLUMNS = (
     "symbol",
     "name",
@@ -272,16 +270,9 @@ def persist_staged_evidence(
     manifest = json.loads((staging / "manifest.json").read_text(encoding="utf-8"))
     evidence_date = pd.Timestamp(manifest["evidence_date"]).date().isoformat()
 
-    current = now if now is not None else pd.Timestamp.now(tz=CHINA_TZ)
-    if current.tzinfo is None:
-        current = current.tz_localize(CHINA_TZ)
-    else:
-        current = current.tz_convert(CHINA_TZ)
-
     if market_close_guard:
-        same_day = current.date().isoformat() == evidence_date
-        after_close = current.time() >= time(15, 10)
-        if not same_day or not after_close:
+        decision = evaluate_after_close(evidence_date, now=now)
+        if not decision.eligible:
             return PITEvidencePersistResult(
                 status="skipped_market_clock",
                 evidence_date=evidence_date,

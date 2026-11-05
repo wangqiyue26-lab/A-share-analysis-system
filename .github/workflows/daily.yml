@@ -238,27 +238,41 @@ jobs:
         shell: bash
         run: |
           python - <<'PY'
+          import json
           import os
-          from datetime import time
+          from dataclasses import asdict
           from zoneinfo import ZoneInfo
 
           import pandas as pd
 
+          from ashare_system.after_close_clock import evaluate_after_close
+
           now = pd.Timestamp.now(tz=ZoneInfo("Asia/Shanghai"))
           frame = pd.read_csv("reports/production/selection/selected.csv")
-          signal_date = pd.to_datetime(frame["as_of"]).max().date()
-          eligible = now.time() >= time(15, 10) and signal_date == now.date()
+          signal_dates = pd.to_datetime(frame["as_of"]).dt.date.unique()
+          if len(signal_dates) != 1:
+              raise RuntimeError(f"Expected one market signal date, got {signal_dates}")
+          decision = evaluate_after_close(signal_dates[0], now=now)
           with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as handle:
-              handle.write(f"eligible={'true' if eligible else 'false'}\n")
-              handle.write(f"signal_date={signal_date.isoformat()}\n")
+              handle.write(f"eligible={'true' if decision.eligible else 'false'}\n")
+              handle.write(f"signal_date={decision.signal_date}\n")
               handle.write(f"china_date={now.date().isoformat()}\n")
-          print(
-              {
-                  "eligible": eligible,
-                  "signal_date": signal_date.isoformat(),
-                  "china_now": now.isoformat(),
-              }
-          )
+              handle.write(f"reason={decision.reason}\n")
+          print(json.dumps(asdict(decision), ensure_ascii=False, indent=2))
+          with open(os.environ["GITHUB_STEP_SUMMARY"], "a", encoding="utf-8") as handle:
+              handle.write(
+                  f"### V2 after-close gate\n"
+                  f"- Signal: {decision.signal_date}\n"
+                  f"- Evaluated: {decision.evaluated_at}\n"
+                  f"- Eligibility: {decision.eligible} ({decision.reason})\n"
+                  f"- Expires: {decision.expires_at}\n"
+              )
+          if not decision.eligible:
+              print(
+                  f"::warning title=V2 shadow step skipped::"
+                  f"{decision.reason}; signal={decision.signal_date}; "
+                  f"evaluated={decision.evaluated_at}"
+              )
           PY
       - name: Run scheduled CNY 20k shadow portfolio v2
         if: github.ref == 'refs/heads/main' && steps.evidence_clock.outputs.eligible == 'true'
@@ -302,6 +316,8 @@ jobs:
           index = Path("site/index.html").read_text(encoding="utf-8")
           assert "fundamentals.html" in index
           shadow_metrics = Path("reports/production/shadow_v2/metrics.json")
+          if "${{ steps.evidence_clock.outputs.eligible }}" == "true":
+              assert shadow_metrics.exists(), "Eligible V2 run produced no metrics"
           if shadow_metrics.exists():
               shadow = json.loads(shadow_metrics.read_text(encoding="utf-8"))
               assert shadow["real_money_ready"] is False
