@@ -54,7 +54,11 @@ def apply_reviewed_delisting_correction(
     if not listing < official or not published <= official:
         raise ValueError("Invalid official listing/delisting evidence chronology")
     result.loc[index, "delist_date"] = OFFICIAL_DELIST_DATE
-    changes = result.astype(str).ne(lifecycle.astype(str))
+    # Pandas can coerce untouched missing delist dates from None to NaN when
+    # updating the column. Both represent missing; do not flag them as edits.
+    changes = result.astype(str).ne(lifecycle.astype(str)) & ~(
+        result.isna() & lifecycle.isna()
+    )
     # 'symbol' was normalized to six characters. Verify precisely one changed cell,
     # in delist_date, with no unintended membership edits.
     changed_cells = [
