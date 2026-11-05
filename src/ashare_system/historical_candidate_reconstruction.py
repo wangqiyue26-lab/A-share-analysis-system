@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import json
+from collections.abc import Iterable
 from pathlib import Path
 
 import pandas as pd
@@ -261,16 +262,38 @@ def reconstruct_calendar(
     min_amount: float = 50_000_000.0,
     min_listing_days: int = 120,
     allowed_exchanges: tuple[str, ...] = ("SSE", "SZSE"),
+    trading_dates: Iterable[str | pd.Timestamp] | None = None,
 ) -> dict[str, object]:
+    """Audit every observed/source-calendar day, never silently drop missing data.
+
+    A supplied, independently sourced trading calendar detects dates where both
+    archives are absent. Without it, the archive union is only a diagnostic
+    calendar; neither case alone can authorize a reconstructed V2 backtest.
+    """
     lifecycle = normalize_lifecycle(lifecycle)
     amounts = normalize_amounts(amounts)
     states = normalize_states(states)
 
-    amount_dates = set(amounts["trade_date"].unique())
-    state_dates = set(states["trade_date"].unique())
-    dates = sorted(pd.Timestamp(value).normalize() for value in amount_dates & state_dates)
+    amount_groups = amounts.groupby("trade_date", sort=False).indices
+    state_groups = states.groupby("trade_date", sort=False).indices
+    archive_dates = set(amount_groups) | set(state_groups)
+    if trading_dates is None:
+        dates = sorted(archive_dates)
+        supplied_calendar = False
+    else:
+        supplied = pd.to_datetime(pd.Series(list(trading_dates)), errors="coerce").dt.normalize()
+        if supplied.empty or supplied.isna().any():
+            raise ValueError("Trading calendar is empty or contains invalid dates")
+        if supplied.duplicated().any():
+            raise ValueError("Trading calendar contains duplicate dates")
+        dates = sorted(set(supplied.tolist()))
+        supplied_calendar = True
+        unlisted_dates = archive_dates - set(dates)
+        if unlisted_dates:
+            examples = sorted(str(value.date()) for value in unlisted_dates)[:10]
+            raise ValueError(f"Archive dates not in trading calendar: {examples}")
     if not dates:
-        raise RuntimeError("No overlapping amount/state trading dates")
+        raise RuntimeError("No historical trading dates supplied or observed")
 
     output = Path(output_dir)
     candidate_dir = output / "candidates"
@@ -278,10 +301,20 @@ def reconstruct_calendar(
     audits: list[dict[str, object]] = []
     failures: list[dict[str, object]] = []
 
+    # Group indices avoid rescanning multi-million-row archives on every date.
     for date in dates:
-        amount_day = amounts[amounts["trade_date"].eq(date)]
-        state_day = states[states["trade_date"].eq(date)]
+        amount_day = amounts.iloc[amount_groups[date]] if date in amount_groups else amounts.iloc[0:0]
+        state_day = states.iloc[state_groups[date]] if date in state_groups else states.iloc[0:0]
         try:
+            if amount_day.empty or state_day.empty:
+                missing = [
+                    label for label, frame in (("amount", amount_day), ("state", state_day))
+                    if frame.empty
+                ]
+                raise RuntimeError(
+                    f"Missing complete market date {date.date()} in "
+                    f"{', '.join(missing)} archive(s)"
+                )
             selected, audit = reconstruct_candidate_day(
                 date=date,
                 lifecycle=lifecycle,
@@ -315,7 +348,10 @@ def reconstruct_calendar(
         "status": "complete" if not failures else "incomplete",
         "strict_point_in_time_evidence": False,
         "reconstruction_grade": "historical_reconstructed_candidate",
-        "input_overlap_dates": len(dates),
+        "input_calendar_dates": len(dates),
+        "archive_union_dates": len(archive_dates),
+        "independent_calendar_supplied": supplied_calendar,
+        "calendar_source": "supplied_external" if supplied_calendar else "archive_union_only",
         "successful_candidate_dates": len(audits),
         "failed_candidate_dates": len(failures),
         "success_rate": len(audits) / len(dates),
@@ -328,9 +364,20 @@ def reconstruct_calendar(
             "Historical float_market_cap is not available. Exact amount ties use symbol "
             "instead of float_market_cap then symbol."
         ),
-        "ready_for_reconstructed_backtest": bool(
-            not failures and len(audits) >= 21
+        "candidate_calendar_complete": bool(
+            supplied_calendar and not failures and len(audits) >= 21
         ),
+        # Calendar completeness is a necessary but insufficient gate. ST event
+        # reconciliation, Top60 tie-breaks, and live-observed reproduction remain
+        # separate human/audited prerequisites (Issue #39).
+        "ready_for_reconstructed_backtest": False,
+        "pending_evidence_gates": [
+            "independent_trading_calendar_and_zero_daily_gaps",
+            "historical_st_effective_date_reconciliation",
+            "historical_top60_tiebreak_and_full_rankable_amount_coverage",
+            "crosscheck_against_immutable_live_pit_observations",
+            "frozen_v2_research_governance_review",
+        ],
     }
     (output / "summary.json").write_text(
         json.dumps(payload, ensure_ascii=False, indent=2) + "\n",
@@ -350,6 +397,10 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--limit", type=int, default=60)
     parser.add_argument("--min-amount", type=float, default=50_000_000.0)
     parser.add_argument("--min-listing-days", type=int, default=120)
+    parser.add_argument(
+        "--trading-calendar-file",
+        help="Independent exchange/benchmark trading calendar CSV with trade_date column",
+    )
     return parser
 
 
@@ -358,6 +409,12 @@ def main() -> int:
     lifecycle = pd.read_csv(args.lifecycle_file, dtype={"symbol": str})
     amounts = pd.read_parquet(args.amounts_file)
     states = pd.read_parquet(args.states_file)
+    trading_dates = None
+    if args.trading_calendar_file:
+        calendar = pd.read_csv(args.trading_calendar_file)
+        if "trade_date" not in calendar.columns:
+            raise ValueError("Trading calendar CSV missing trade_date column")
+        trading_dates = calendar["trade_date"].tolist()
     payload = reconstruct_calendar(
         lifecycle=lifecycle,
         amounts=amounts,
@@ -366,6 +423,7 @@ def main() -> int:
         limit=args.limit,
         min_amount=args.min_amount,
         min_listing_days=args.min_listing_days,
+        trading_dates=trading_dates,
     )
     print(json.dumps(payload, ensure_ascii=False, indent=2))
     return 0
