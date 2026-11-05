@@ -1,0 +1,115 @@
+name: Historical ST exception Top60 overlap audit
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - ".github/workflows/historical-st-exception-impact.yml"
+
+permissions:
+  contents: read
+  actions: read
+
+concurrency:
+  group: historical-st-exception-impact-${{ github.ref_name }}
+  cancel-in-progress: true
+
+jobs:
+  impact:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+      - name: Install
+        run: python -m pip install -e .
+
+      - name: Download independently audited SZSE status exceptions
+        uses: actions/download-artifact@v4
+        with:
+          name: historical-szse-st-crosscheck-41974678199
+          path: reports/st-exception/inputs/verdicts
+          github-token: ${{ github.token }}
+          run-id: 41974678199
+
+      - name: Download corrected fixed historical Top60 calendar
+        uses: actions/download-artifact@v4
+        with:
+          name: research-top60-corrected-41963130563
+          path: reports/st-exception/inputs/candidates
+          github-token: ${{ github.token }}
+          run-id: 41963130563
+
+      - name: Assert source identities and independent archive grades
+        run: |
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          root = Path("reports/st-exception/inputs")
+          st = json.loads((root / "verdicts/summary.json").read_text())
+          universe = json.loads((root / "candidates/top60/summary.json").read_text())
+          assert st["official_st_transition_count"] == 437
+          assert st["distinct_symbols"] == 308
+          assert st["complete_st_history_claim"] is False
+          assert universe["input_calendar_dates"] == 927
+          assert universe["successful_candidate_dates"] == 927
+          assert universe["strict_point_in_time_evidence"] is False
+          assert universe["ready_for_reconstructed_backtest"] is False
+          PY
+
+      - name: Verify exception symbols never entered reconstructed Top60 after events
+        run: >-
+          python -m ashare_system.st_exception_top60_impact
+          --szse-verdicts reports/st-exception/inputs/verdicts/szse_transition_verdicts.csv
+          --lifecycle-file reports/st-exception/inputs/candidates/corrected/corrected_lifecycle.csv
+          --candidates-dir reports/st-exception/inputs/candidates/top60/candidates
+          --output-dir reports/st-exception/result
+
+      - name: Apply membership-only exception gate
+        if: always()
+        run: |
+          python - <<'PY'
+          import json
+          import os
+          from pathlib import Path
+          root = Path("reports/st-exception/result")
+          file = root / "summary.json"
+          if not file.exists():
+              raise RuntimeError("ST exception impact summary missing")
+          s = json.loads(file.read_text())
+          assert s["examined_candidate_dates"] == 927
+          assert s["exception_events"] == 46
+          assert s["b_share_missing_states_not_in_a_universe"] == 4
+          assert s["delisting_name_events_not_auto_st_removals"] == 41
+          assert s["suspended_effective_day_events"] == 1
+          assert s["full_historical_ST_evidence_gate_passed"] is False
+          assert s["ready_for_reconstructed_backtest"] is False
+          assert s["real_money_ready"] is False
+          lines = [
+              "## Retrospective SZSE exception / Top60 membership audit",
+              f"Compared {s['exception_events']} exceptions against {s['examined_candidate_dates']} historical trading days.",
+              f"Selected after event: {s['post_exception_candidate_membership_hits']}",
+              f"Non-A-share B share exceptions: {s['b_share_missing_states_not_in_a_universe']}",
+              f"Delisting-name transitions: {s['delisting_name_events_not_auto_st_removals']}",
+              f"Suspended effective day: {s['suspended_effective_day_events']}",
+              "**Historical publication availability not verified. V2 A/B remains blocked.**",
+          ]
+          md = "\n".join(lines) + "\n"
+          (root / "report.md").write_text(md, encoding="utf-8")
+          with open(os.environ["GITHUB_STEP_SUMMARY"], "a") as handle:
+              handle.write(md)
+          assert s["post_exception_candidate_membership_hits"] == 0
+          PY
+
+      - name: Upload exception impact report without changing any ledger
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: historical-st-exception-impact-${{ github.run_id }}
+          path: reports/st-exception/result/
+          retention-days: 90
+          if-no-files-found: warn
