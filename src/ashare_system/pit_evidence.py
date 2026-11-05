@@ -11,6 +11,7 @@ import pandas as pd
 
 from .after_close_clock import evaluate_after_close
 from .data.security_master import SecurityMasterSnapshotStore, validate_security_master
+
 MASTER_STATE_COLUMNS = (
     "symbol",
     "name",
