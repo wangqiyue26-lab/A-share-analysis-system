@@ -67,11 +67,11 @@ def check_recovered_symbol(
     return valid, {
         "symbol": code,
         "source": "baostock_historical_unadjusted",
-        "returned_date_count": int(len(frame)),
-        "recovered_amount_rows": int(len(valid)),
-        "archived_state_dates": int(len(state)),
-        "rankable_state_dates": int(len(rankable)),
-        "unresolved_rankable_dates": int(len(gaps)),
+        "returned_date_count": len(frame),
+        "recovered_amount_rows": len(valid),
+        "archived_state_dates": len(state),
+        "rankable_state_dates": len(rankable),
+        "unresolved_rankable_dates": len(gaps),
         "unresolved_examples": [
             value.date().isoformat() for value in gaps["trade_date"].head(10)
         ],
