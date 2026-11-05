@@ -113,3 +113,21 @@ def test_pilot_sampling_is_deterministic_across_four_cohorts():
         "SZSE_apply": 3,
         "SZSE_remove": 3,
     }
+
+
+def test_historical_background_date_does_not_override_current_effective_date():
+    text = (
+        "撤销起始日为2024年6月11日。"
+        "股票简称由“ST实达”变更为“实达集团”。"
+        "撤销其他风险警示的起始日：2024年6月11日。"
+        "公司曾于2022年6月15日起撤销退市风险警示，但仍被实施其他风险警示。"
+    )
+    status, event = parse_effective_st_event(
+        text,
+        announcement_time="2024-06-07 18:00:00",
+        symbol="600734",
+    )
+    assert status == "verified"
+    assert event is not None
+    assert event.effective_date == "2024-06-11"
+    assert event.action == "remove_st"
