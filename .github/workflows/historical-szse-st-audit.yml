@@ -1,0 +1,120 @@
+name: SZSE historical ST change cross-source audit
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - ".github/workflows/historical-szse-st-audit.yml"
+
+permissions:
+  contents: read
+  actions: read
+
+concurrency:
+  group: historical-szse-st-audit-${{ github.ref_name }}
+  cancel-in-progress: true
+
+jobs:
+  compare:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+      - name: Install
+        run: python -m pip install -e .
+
+      - name: Download official SZSE historical name changes
+        uses: actions/download-artifact@v4
+        with:
+          name: historical-amount-full-lifecycle-41632436412
+          path: reports/szse-st-crosscheck/inputs/lifecycle
+          github-token: ${{ github.token }}
+          run-id: 41632436412
+
+      - name: Download independent historical daily ST archive
+        uses: actions/download-artifact@v4
+        with:
+          name: historical-state-2023-2026-41955532253
+          path: reports/szse-st-crosscheck/inputs/state
+          github-token: ${{ github.token }}
+          run-id: 41955532253
+
+      - name: Verify immutable research sources
+        run: |
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          lifecycle = json.loads(
+              Path("reports/szse-st-crosscheck/inputs/lifecycle/summary.json").read_text()
+          )
+          state = json.loads(
+              Path("reports/szse-st-crosscheck/inputs/state/manifest.json").read_text()
+          )
+          assert lifecycle["status"] == "inventory_complete"
+          assert lifecycle["period_start"] == "2023-01-03"
+          assert lifecycle["period_end"] == "2026-11-03"
+          assert state["status"] == "complete"
+          assert state["shard_count"] == 32
+          assert state["failed_symbol_count"] == 0
+          assert state["strict_point_in_time_evidence"] is False
+          PY
+
+      - name: Compare official SZSE effective dates against independent isST
+        run: >-
+          python -m ashare_system.historical_szse_st_audit
+          --szse-changes-file reports/szse-st-crosscheck/inputs/lifecycle/szse_name_changes.csv
+          --states-file reports/szse-st-crosscheck/inputs/state/historical_states_2023_2026.parquet
+          --output-dir reports/szse-st-crosscheck/result
+
+      - name: Publish research coverage and unresolved conflicts
+        if: always()
+        run: |
+          python - <<'PY'
+          import json
+          import os
+          from pathlib import Path
+          out = Path("reports/szse-st-crosscheck/result")
+          file = out / "summary.json"
+          if not file.exists():
+              raise RuntimeError("SZSE audit failed to produce summary")
+          s = json.loads(file.read_text())
+          assert s["official_st_transition_count"] >= 1
+          assert s["disclosure_publication_times_checked"] is False
+          assert s["complete_st_history_claim"] is False
+          assert s["ready_for_reconstructed_backtest"] is False
+          assert s["real_money_ready"] is False
+          lines = [
+              "## Official SZSE ST change / BaoStock cross-source audit",
+              f"- Official ST name-change events: {s['official_st_transition_count']}",
+              f"- Independent same-day event matches: {s['same_day_state_matches']}",
+              "- Discrepancy categories:",
+          ]
+          lines.extend(
+              f"  - {name}: {count}" for name, count in s["verdict_counts"].items()
+          )
+          lines.extend([
+              "- SSE coverage: not tested",
+              "- Announcement publication timestamps: not verified",
+              "- Historical V2 A/B: **BLOCKED**",
+              "- Real-money trading: **DISABLED**",
+          ])
+          content = "\n".join(lines) + "\n"
+          (out / "report.md").write_text(content, encoding="utf-8")
+          with open(os.environ["GITHUB_STEP_SUMMARY"], "a") as handle:
+              handle.write(content)
+          print(content)
+          PY
+
+      - name: Upload SZSE source reconciliation evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: historical-szse-st-crosscheck-${{ github.run_id }}
+          path: reports/szse-st-crosscheck/result/
+          retention-days: 90
+          if-no-files-found: warn
