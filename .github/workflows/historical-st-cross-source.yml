@@ -1,0 +1,125 @@
+name: Historical ST effective-date cross-source pilot
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - ".github/workflows/historical-st-cross-source.yml"
+
+permissions:
+  contents: read
+  actions: read
+
+concurrency:
+  group: historical-st-cross-source-${{ github.ref_name }}
+  cancel-in-progress: true
+
+jobs:
+  reconcile:
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+      - name: Install
+        run: python -m pip install -e .
+
+      - name: Download immutable CNINFO PDF pilot
+        uses: actions/download-artifact@v4
+        with:
+          name: st-effective-date-pilot-41957146717
+          path: reports/st-reconciliation/inputs/pdf-pilot
+          github-token: ${{ github.token }}
+          run-id: 41957146717
+
+      - name: Download independent BaoStock daily state archive
+        uses: actions/download-artifact@v4
+        with:
+          name: historical-state-2023-2026-41955532253
+          path: reports/st-reconciliation/inputs/state
+          github-token: ${{ github.token }}
+          run-id: 41955532253
+
+      - name: Assert pinned research provenance
+        run: |
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          root = Path("reports/st-reconciliation/inputs")
+          pdf = json.loads((root / "pdf-pilot/summary.json").read_text())
+          state = json.loads((root / "state/manifest.json").read_text())
+          assert pdf["sample_count"] == 40
+          assert pdf["verified_count"] == 13
+          assert pdf["strict_point_in_time_evidence"] is False
+          assert state["status"] == "complete"
+          assert state["symbol_count"] == 5373
+          assert state["success_count"] == 5373
+          assert state["strict_point_in_time_evidence"] is False
+          assert state["period_start"] == "2023-01-03"
+          assert state["period_end"] == "2026-11-03"
+          print(json.dumps({
+              "pdf_pilot": "41957146717",
+              "state_archive": "41955532253",
+              "sample": 40,
+              "parsed_events": 13,
+              "research_only": True,
+          }, ensure_ascii=False, indent=2))
+          PY
+
+      - name: Reconcile PDF timing, actions and exact archived ST transitions
+        run: >-
+          python -m ashare_system.st_effective_reconciliation
+          --verified-events reports/st-reconciliation/inputs/pdf-pilot/verified_events.csv
+          --states-file reports/st-reconciliation/inputs/state/historical_states_2023_2026.parquet
+          --output-dir reports/st-reconciliation/result
+
+      - name: Write interpretation and retain hard PIT gate
+        if: always()
+        run: |
+          python - <<'PY'
+          import json
+          import os
+          from pathlib import Path
+
+          root = Path("reports/st-reconciliation/result")
+          summary_file = root / "summary.json"
+          if not summary_file.exists():
+              raise RuntimeError("ST sample audit did not produce summary.json")
+          summary = json.loads(summary_file.read_text())
+          assert summary["verified_pdf_event_count"] == 13
+          assert summary["full_historical_st_reconciliation_passed"] is False
+          assert summary["ready_for_reconstructed_backtest"] is False
+          assert summary["strict_point_in_time_evidence"] is False
+          assert summary["real_money_ready"] is False
+          markdown = [
+              "## CNINFO PDF / BaoStock historical ST pilot",
+              "Source runs: PDF 41957146717; ST archive 41955532253.",
+              "This checks **13 selected PDF events**, not every ST transition.",
+              f"Verified PDF events: {summary['verified_pdf_event_count']}",
+              f"Independent sample matches: {summary['matched_events']}",
+              "Event verdict counts:",
+          ]
+          markdown += [
+              f"- {name}: {count}"
+              for name, count in summary["verdict_counts"].items()
+          ]
+          markdown.append("Full ST effective-date evidence gate: **BLOCKED**")
+          markdown.append("Historical V2 A/B and real-money trading: **NOT APPROVED**")
+          report = "\n".join(markdown) + "\n"
+          (root / "report.md").write_text(report, encoding="utf-8")
+          with open(os.environ["GITHUB_STEP_SUMMARY"], "a") as handle:
+              handle.write(report)
+          PY
+
+      - name: Upload research-only ST discrepancy report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: historical-st-cross-source-${{ github.run_id }}
+          path: reports/st-reconciliation/result/
+          retention-days: 90
+          if-no-files-found: warn
