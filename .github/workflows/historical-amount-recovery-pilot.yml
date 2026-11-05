@@ -1,0 +1,159 @@
+name: BaoStock historical amount recovery pilot
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - main
+    paths:
+      - ".github/workflows/historical-amount-recovery-pilot.yml"
+
+permissions:
+  contents: read
+  actions: read
+
+concurrency:
+  group: historical-amount-recovery-pilot-${{ github.ref_name }}
+  cancel-in-progress: true
+
+jobs:
+  recovery:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+      - name: Install
+        run: python -m pip install -e .
+
+      - name: Download original validated historical amount archive
+        uses: actions/download-artifact@v4
+        with:
+          name: historical-amount-2023-2026-41632436412
+          path: reports/amount-recovery-inputs/amount
+          github-token: ${{ github.token }}
+          run-id: 41632436412
+
+      - name: Download official historical lifecycle
+        uses: actions/download-artifact@v4
+        with:
+          name: historical-amount-full-lifecycle-41632436412
+          path: reports/amount-recovery-inputs/lifecycle
+          github-token: ${{ github.token }}
+          run-id: 41632436412
+
+      - name: Download full historical ST/state archive
+        uses: actions/download-artifact@v4
+        with:
+          name: historical-state-2023-2026-41955532253
+          path: reports/amount-recovery-inputs/state
+          github-token: ${{ github.token }}
+          run-id: 41955532253
+
+      - name: Download fixed independent calendar from prior audit
+        uses: actions/download-artifact@v4
+        with:
+          name: research-only-historical-top60-41960206099
+          path: reports/amount-recovery-inputs/calendar
+          github-token: ${{ github.token }}
+          run-id: 41960206099
+
+      - name: Recover only 27 missing archive symbols
+        run: >-
+          python -m ashare_system.historical_amount_recovery
+          --lifecycle-file reports/amount-recovery-inputs/lifecycle/lifecycle.csv
+          --states-file reports/amount-recovery-inputs/state/historical_states_2023_2026.parquet
+          --amount-manifest reports/amount-recovery-inputs/amount/manifest.json
+          --output-dir reports/amount-recovery-pilot/recovery
+
+      - name: Build isolated merged research input
+        run: |
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          import pandas as pd
+
+          original = pd.read_parquet(
+              "reports/amount-recovery-inputs/amount/historical_amounts_2023_2026.parquet"
+          )
+          addition = pd.read_parquet(
+              "reports/amount-recovery-pilot/recovery/recovered_amounts.parquet"
+          )
+          combined = pd.concat([original, addition], ignore_index=True)
+          combined["symbol"] = combined["symbol"].astype(str).str.zfill(6)
+          if combined.duplicated(["symbol", "trade_date"]).any():
+              raise RuntimeError("Recovery would overwrite or duplicate original amount rows")
+          path = Path("reports/amount-recovery-pilot/working")
+          path.mkdir(parents=True, exist_ok=True)
+          combined.to_parquet(path / "merged_research_amounts.parquet", index=False)
+          print(json.dumps({
+              "initial_amount_rows": len(original),
+              "recovered_amount_rows": len(addition),
+              "research_only_merged_rows": len(combined),
+              "original_archive_unmodified": True,
+          }, indent=2))
+          PY
+
+      - name: Re-audit historical Top60 with recovered amount research input
+        run: >-
+          python -m ashare_system.historical_candidate_reconstruction
+          --lifecycle-file reports/amount-recovery-inputs/lifecycle/lifecycle.csv
+          --amounts-file reports/amount-recovery-pilot/working/merged_research_amounts.parquet
+          --states-file reports/amount-recovery-inputs/state/historical_states_2023_2026.parquet
+          --trading-calendar-file reports/amount-recovery-inputs/calendar/trading_calendar.csv
+          --output-dir reports/amount-recovery-pilot/candidate-audit
+          --limit 60
+          --min-amount 50000000
+          --min-listing-days 120
+
+      - name: Compare before versus after and keep research gates closed
+        if: always()
+        run: |
+          python - <<'PY'
+          import json
+          from pathlib import Path
+
+          output = Path("reports/amount-recovery-pilot")
+          before = json.loads(
+              Path("reports/amount-recovery-inputs/calendar/summary.json").read_text()
+          )
+          recovered = json.loads((output / "recovery/summary.json").read_text())
+          after_path = output / "candidate-audit/summary.json"
+          after = json.loads(after_path.read_text()) if after_path.exists() else None
+          result = {
+              "original_successful_candidate_days": before["successful_candidate_dates"],
+              "original_failed_candidate_days": before["failed_candidate_dates"],
+              "recovered": recovered,
+              "after": after,
+              "strict_live_observed": False,
+              "real_money_ready": False,
+              "ready_for_reconstructed_backtest": False,
+          }
+          assert before["ready_for_reconstructed_backtest"] is False
+          assert recovered["original_archive_unmodified"] is True
+          assert recovered["ready_for_reconstructed_backtest"] is False
+          if after is not None:
+              assert after["ready_for_reconstructed_backtest"] is False
+          (output / "comparison.json").write_text(
+              json.dumps(result, ensure_ascii=False, indent=2) + "\n",
+              encoding="utf-8",
+          )
+          print(json.dumps(result, ensure_ascii=False, indent=2))
+          PY
+
+      - name: Upload source-by-source recovery and candidate-gap audit
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: baostock-amount-recovery-research-${{ github.run_id }}
+          path: |
+            reports/amount-recovery-pilot/recovery/
+            reports/amount-recovery-pilot/candidate-audit/
+            reports/amount-recovery-pilot/comparison.json
+          retention-days: 90
+          if-no-files-found: warn
