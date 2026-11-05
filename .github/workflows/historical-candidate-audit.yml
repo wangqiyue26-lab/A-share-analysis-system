@@ -1,0 +1,199 @@
+name: Historical Top60 candidate evidence audit
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - main
+    paths:
+      - ".github/workflows/historical-candidate-audit.yml"
+
+permissions:
+  contents: read
+  actions: read
+
+concurrency:
+  group: historical-candidate-audit-${{ github.ref_name }}
+  cancel-in-progress: true
+
+jobs:
+  audit:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - name: Checkout frozen V2 research code
+        uses: actions/checkout@v6
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+
+      - name: Install
+        run: python -m pip install -e .
+
+      # Explicitly pinned artifacts: this is a reproducible, fixed-end
+      # 2023-01-03 .. 2026-11-03 audit, not mutable production PIT evidence.
+      - name: Download validated historical amount archive
+        uses: actions/download-artifact@v4
+        with:
+          name: historical-amount-2023-2026-41632436412
+          path: reports/historical-inputs/amount
+          github-token: ${{ github.token }}
+          run-id: 41632436412
+
+      - name: Download official reconstructed lifecycle archive
+        uses: actions/download-artifact@v4
+        with:
+          name: historical-amount-full-lifecycle-41632436412
+          path: reports/historical-inputs/lifecycle
+          github-token: ${{ github.token }}
+          run-id: 41632436412
+
+      - name: Download validated historical ST and trading-state archive
+        uses: actions/download-artifact@v4
+        with:
+          name: historical-state-2023-2026-41955532253
+          path: reports/historical-inputs/state
+          github-token: ${{ github.token }}
+          run-id: 41955532253
+
+      - name: Assert source provenance and fixed study window
+        run: |
+          python - <<'PY'
+          import json
+          from pathlib import Path
+
+          root = Path("reports/historical-inputs")
+          amount = json.loads((root / "amount/manifest.json").read_text())
+          state = json.loads((root / "state/manifest.json").read_text())
+          lifecycle = json.loads((root / "lifecycle/summary.json").read_text())
+          for source in (amount, state, lifecycle):
+              assert source["period_start"] == "2023-01-03", source
+              assert source["period_end"] == "2026-11-03", source
+          assert amount["status"] == "complete"
+          assert amount["shard_count"] == 32
+          assert amount["symbol_count"] == 5373
+          assert amount["strict_point_in_time_evidence"] is False
+          assert state["status"] == "complete"
+          assert state["shard_count"] == 32
+          assert state["success_count"] == 5373
+          assert state["failed_symbol_count"] == 0
+          assert state["strict_point_in_time_evidence"] is False
+          assert lifecycle["status"] == "inventory_complete"
+          assert lifecycle["listing_date_coverage"] == 1.0
+          assert lifecycle["delist_date_coverage_for_delisted"] == 1.0
+          for item in [
+              root / "lifecycle/lifecycle.csv",
+              root / "amount/historical_amounts_2023_2026.parquet",
+              root / "state/historical_states_2023_2026.parquet",
+          ]:
+              assert item.exists(), item
+          print(json.dumps({
+              "amount_failure_symbols": amount["failed_symbols"],
+              "state_success_rate": state["success_rate"],
+              "evidence_grade": "reconstructed_research_only",
+          }, ensure_ascii=False, indent=2))
+          PY
+
+      - name: Fetch independent CSI300 market-day calendar
+        run: |
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          import pandas as pd
+          from ashare_system.data.benchmark import AkshareBenchmarkProvider
+
+          benchmark = AkshareBenchmarkProvider().get_daily(
+              "000300", "20230103", "20261103"
+          )
+          dates = pd.to_datetime(benchmark["trade_date"]).dt.normalize()
+          first = pd.Timestamp("2023-01-03")
+          last = pd.Timestamp("2026-11-03")
+          if dates.empty or first not in set(dates) or last not in set(dates):
+              raise RuntimeError("Independent market calendar lacks study endpoints")
+          if dates.duplicated().any():
+              raise RuntimeError("Duplicate independent trading dates")
+          if dates.min() < first or dates.max() > last:
+              raise RuntimeError("Independent calendar extends outside fixed study window")
+          output = Path("reports/historical-candidate-audit")
+          output.mkdir(parents=True, exist_ok=True)
+          dates.to_frame(name="trade_date").to_csv(
+              output / "trading_calendar.csv", index=False
+          )
+          (output / "calendar_provenance.json").write_text(
+              json.dumps({
+                  "index": "CSI300_000300",
+                  "provider": benchmark.attrs.get("provider", "unknown"),
+                  "first": first.date().isoformat(),
+                  "last": last.date().isoformat(),
+                  "dates": len(dates),
+                  "claim": "independent_market_day_calendar_not_strict_PIT",
+              }, indent=2),
+              encoding="utf-8",
+          )
+          PY
+
+      - name: Build research-only historical Top60 and gap calendar
+        run: >-
+          python -m ashare_system.historical_candidate_reconstruction
+          --lifecycle-file reports/historical-inputs/lifecycle/lifecycle.csv
+          --amounts-file reports/historical-inputs/amount/historical_amounts_2023_2026.parquet
+          --states-file reports/historical-inputs/state/historical_states_2023_2026.parquet
+          --trading-calendar-file reports/historical-candidate-audit/trading_calendar.csv
+          --output-dir reports/historical-candidate-audit
+          --limit 60
+          --min-amount 50000000
+          --min-listing-days 120
+
+      - name: Inspect reconstruction gaps without approving historical V2 backtest
+        if: always()
+        run: |
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          import pandas as pd
+
+          root = Path("reports/historical-candidate-audit")
+          summary = root / "summary.json"
+          if not summary.exists():
+              raise SystemExit("Historical candidate audit did not produce summary.json")
+          p = json.loads(summary.read_text(encoding="utf-8"))
+          assert p["strict_point_in_time_evidence"] is False
+          assert p["ready_for_reconstructed_backtest"] is False
+          failures = root / "failures.csv"
+          category_counts = {}
+          if failures.exists() and failures.stat().st_size > 0:
+              frame = pd.read_csv(failures)
+              if not frame.empty:
+                  category_counts = frame["error"].str.extract(
+                      r"^([^:]+):", expand=False
+                  ).fillna("unclassified").value_counts().to_dict()
+          report = {
+              "study": "frozen_v2_historical_Top60_research_only",
+              "strict_live_observed": False,
+              "real_money_ready": False,
+              "summary": p,
+              "error_categories": category_counts,
+          }
+          (root / "research_verdict.json").write_text(
+              json.dumps(report, ensure_ascii=False, indent=2) + "\n",
+              encoding="utf-8",
+          )
+          print(json.dumps(report, ensure_ascii=False, indent=2))
+          with open(__import__("os").environ["GITHUB_STEP_SUMMARY"], "a") as out:
+              out.write("## Historical Top60 research-only candidate audit\n")
+              out.write(f"- Successful dates: {p['successful_candidate_dates']}\n")
+              out.write(f"- Failed dates: {p['failed_candidate_dates']}\n")
+              out.write("- Reconstructed backtest approval: **NO**\n")
+          PY
+
+      - name: Upload candidate reconstruction and gap evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: research-only-historical-top60-${{ github.run_id }}
+          path: reports/historical-candidate-audit/
+          retention-days: 90
+          if-no-files-found: warn
