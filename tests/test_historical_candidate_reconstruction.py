@@ -6,6 +6,7 @@ from ashare_system.historical_candidate_reconstruction import (
     normalize_lifecycle,
     normalize_states,
     reconstruct_candidate_day,
+    reconstruct_calendar,
 )
 
 
@@ -190,3 +191,75 @@ def test_missing_amount_for_suspended_or_st_name_does_not_bias_ranking():
     assert selected["symbol"].tolist() == ["000001", "600000"]
     assert audit["missing_amount_count"] == 2
     assert audit["missing_rankable_amount_count"] == 0
+
+
+def test_calendar_union_keeps_day_missing_one_source(tmp_path):
+    amounts = normalize_amounts(_amounts("2024-05-07"))
+    states = normalize_states(pd.concat([
+        _states("2024-05-07"), _states("2024-05-08")
+    ], ignore_index=True))
+    summary = reconstruct_calendar(
+        lifecycle=_lifecycle(),
+        amounts=amounts,
+        states=states,
+        output_dir=tmp_path,
+        limit=1,
+    )
+    assert summary["archive_union_dates"] == 2
+    assert summary["input_calendar_dates"] == 2
+    assert summary["failed_candidate_dates"] == 1
+    assert summary["independent_calendar_supplied"] is False
+    assert summary["ready_for_reconstructed_backtest"] is False
+    failures = pd.read_csv(tmp_path / "failures.csv")
+    assert failures.iloc[0]["trade_date"] == "2024-05-08"
+    assert "amount" in failures.iloc[0]["error"]
+
+
+def test_external_calendar_catches_date_missing_both_sources(tmp_path):
+    summary = reconstruct_calendar(
+        lifecycle=_lifecycle(),
+        amounts=_amounts("2024-05-07"),
+        states=_states("2024-05-07"),
+        output_dir=tmp_path,
+        limit=1,
+        trading_dates=["2024-05-07", "2024-05-08"],
+    )
+    assert summary["input_calendar_dates"] == 2
+    assert summary["archive_union_dates"] == 1
+    assert summary["failed_candidate_dates"] == 1
+    assert summary["candidate_calendar_complete"] is False
+    failures = pd.read_csv(tmp_path / "failures.csv")
+    assert "amount, state" in failures.iloc[0]["error"]
+
+
+def test_complete_calendar_is_still_not_backtest_approval(tmp_path):
+    dates = pd.bdate_range("2024-05-06", periods=21).strftime("%Y-%m-%d").tolist()
+    amounts = pd.concat([_amounts(date) for date in dates], ignore_index=True)
+    states = pd.concat([_states(date) for date in dates], ignore_index=True)
+    summary = reconstruct_calendar(
+        lifecycle=_lifecycle(),
+        amounts=amounts,
+        states=states,
+        output_dir=tmp_path,
+        limit=1,
+        trading_dates=dates,
+    )
+    assert summary["successful_candidate_dates"] == 21
+    assert summary["failed_candidate_dates"] == 0
+    assert summary["candidate_calendar_complete"] is True
+    assert summary["ready_for_reconstructed_backtest"] is False
+    assert "crosscheck_against_immutable_live_pit_observations" in (
+        summary["pending_evidence_gates"]
+    )
+
+
+def test_external_calendar_cannot_silently_exclude_archive_dates(tmp_path):
+    with pytest.raises(ValueError, match="Archive dates not in trading calendar"):
+        reconstruct_calendar(
+            lifecycle=_lifecycle(),
+            amounts=_amounts("2024-05-07"),
+            states=_states("2024-05-07"),
+            output_dir=tmp_path,
+            limit=1,
+            trading_dates=["2024-05-08"],
+        )
