@@ -276,3 +276,32 @@ def test_strict_calendar_audit_rejects_nontrading_evidence_date(tmp_path):
     audit = audit_evidence_calendar(PITEvidenceStore(ledger), benchmark)
     assert audit["status"] == "invalid_nontrading_evidence"
     assert audit["extra_nontrading_dates"] == ["2026-11-07"]
+
+
+def test_pit_evidence_accepts_after_midnight_before_next_preopen(tmp_path):
+    stage = _stage(tmp_path)
+    ledger = tmp_path / "ledger"
+    overnight = pd.Timestamp("2026-11-04T01:24:00", tz="Asia/Shanghai")
+
+    result = persist_staged_evidence(
+        staging_dir=stage,
+        ledger_root=ledger,
+        now=overnight,
+    )
+    assert result.status == "persisted"
+    store = PITEvidenceStore(ledger)
+    assert [day.date().isoformat() for day in store.available_dates()] == ["2026-11-03"]
+    day = store.day_manifest("2026-11-03")
+    assert day["security_master_observed_at"] == "2026-11-03T08:30:00+00:00"
+
+
+def test_pit_evidence_refuses_overnight_after_preopen(tmp_path):
+    stage = _stage(tmp_path)
+    ledger = tmp_path / "ledger"
+    result = persist_staged_evidence(
+        staging_dir=stage,
+        ledger_root=ledger,
+        now=pd.Timestamp("2026-11-04T09:15:00", tz="Asia/Shanghai"),
+    )
+    assert result.status == "skipped_market_clock"
+    assert not (ledger / "days").exists()
