@@ -1,0 +1,193 @@
+name: Official 600190 delisting boundary Top60 audit
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths: [".github/workflows/historical-official-lifecycle-correction.yml"]
+
+permissions:
+  contents: read
+  actions: read
+
+concurrency:
+  group: historical-official-lifecycle-correction-${{ github.ref_name }}
+  cancel-in-progress: true
+
+jobs:
+  corrected-top60:
+    runs-on: ubuntu-latest
+    timeout-minutes: 75
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+      - name: Install
+        run: python -m pip install -e .
+      - name: Download immutable historical lifecycle artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: historical-amount-full-lifecycle-41632436412
+          path: reports/review/inputs/lifecycle
+          github-token: ${{ github.token }}
+          run-id: 41632436412
+      - name: Download immutable historical amount artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: historical-amount-2023-2026-41632436412
+          path: reports/review/inputs/amount
+          github-token: ${{ github.token }}
+          run-id: 41632436412
+      - name: Download immutable historical state artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: historical-state-2023-2026-41955532253
+          path: reports/review/inputs/state
+          github-token: ${{ github.token }}
+          run-id: 41955532253
+      - name: Download isolated 27-symbol amount recovery
+        uses: actions/download-artifact@v4
+        with:
+          name: baostock-amount-recovery-research-41961366890
+          path: reports/review/inputs/recovery
+          github-token: ${{ github.token }}
+          run-id: 41961366890
+      - name: Download independent CSI300 trading calendar
+        uses: actions/download-artifact@v4
+        with:
+          name: research-only-historical-top60-41960206099
+          path: reports/review/inputs/calendar
+          github-token: ${{ github.token }}
+          run-id: 41960206099
+
+      - name: Apply narrowly reviewed delisting date
+        run: >-
+          python -m ashare_system.verified_lifecycle_correction
+          --lifecycle-file reports/review/inputs/lifecycle/lifecycle.csv
+          --output-dir reports/review/corrected
+
+      - name: Assemble separate corrected research inputs
+        run: |
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          import pandas as pd
+          root = Path("reports/review")
+          amount = json.loads((root / "inputs/amount/manifest.json").read_text())
+          state = json.loads((root / "inputs/state/manifest.json").read_text())
+          recovered = json.loads(
+              (root / "inputs/recovery/recovery/summary.json").read_text()
+          )
+          assert amount["status"] == state["status"] == "complete"
+          assert amount["shard_count"] == state["shard_count"] == 32
+          assert amount["period_start"] == state["period_start"] == "2023-01-03"
+          assert amount["period_end"] == state["period_end"] == "2026-11-03"
+          assert amount["strict_point_in_time_evidence"] is False
+          assert state["strict_point_in_time_evidence"] is False
+          assert state["failed_symbol_count"] == 0
+          assert recovered["target_symbol_count"] == 27
+          assert recovered["error_symbol_count"] == 0
+          assert recovered["unresolved_rankable_symbol_days"] == 0
+          original = pd.read_parquet(
+              root / "inputs/amount/historical_amounts_2023_2026.parquet"
+          )
+          patch = pd.read_parquet(
+              root / "inputs/recovery/recovery/recovered_amounts.parquet"
+          )
+          combined = pd.concat([original, patch], ignore_index=True)
+          combined["symbol"] = combined["symbol"].astype(str).str.zfill(6)
+          combined["trade_date"] = pd.to_datetime(
+              combined["trade_date"]
+          ).dt.normalize()
+          if combined.duplicated(["symbol", "trade_date"]).any():
+              raise RuntimeError("Recovery would overwrite original historical amounts")
+          working = root / "working"
+          working.mkdir(parents=True, exist_ok=True)
+          combined.to_parquet(working / "research_only_amounts.parquet", index=False)
+          (working / "sources.json").write_text(
+              json.dumps({
+                  "original_amount_rows": len(original),
+                  "recovered_amount_rows": len(patch),
+                  "research_only_total_rows": len(combined),
+                  "original_archives_unmodified": True,
+                  "strict_live_observed": False,
+                  "real_money_ready": False,
+              }, ensure_ascii=False, indent=2) + "\n",
+              encoding="utf-8",
+          )
+          PY
+
+      - name: Reconstruct Top60 with corrected official lifecycle
+        run: >-
+          python -m ashare_system.historical_candidate_reconstruction
+          --lifecycle-file reports/review/corrected/corrected_lifecycle.csv
+          --amounts-file reports/review/working/research_only_amounts.parquet
+          --states-file reports/review/inputs/state/historical_states_2023_2026.parquet
+          --trading-calendar-file reports/review/inputs/calendar/trading_calendar.csv
+          --output-dir reports/review/top60
+          --limit 60
+          --min-amount 50000000
+          --min-listing-days 120
+
+      - name: Evaluate date-level coverage while leaving strategy gate closed
+        if: always()
+        run: |
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          import pandas as pd
+          root = Path("reports/review")
+          after_path = root / "top60/summary.json"
+          before_path = root / "inputs/recovery/candidate-audit/summary.json"
+          before = json.loads(before_path.read_text())
+          after = json.loads(after_path.read_text()) if after_path.exists() else None
+          source = json.loads((root / "corrected/evidence.json").read_text())
+          assert source["symbol"] == "600190"
+          assert source["official_delist_date"] == "2025-07-25"
+          assert source["strict_live_observed"] is False
+          ties = None
+          audit_path = root / "top60/audit.csv"
+          if audit_path.exists():
+              per_day = pd.read_csv(audit_path)
+              ties = int(per_day["cutoff_amount_tie_count"].gt(1).sum())
+          result = {
+              "reviewed_official_correction": source,
+              "before_success_days": before["successful_candidate_dates"],
+              "before_failed_days": before["failed_candidate_dates"],
+              "after": after,
+              "cutoff_tie_days": ties,
+              "historical_evidence_grade": "retrospective_reconstruction_only",
+              "strict_live_observed": False,
+              "real_money_ready": False,
+              "ready_for_reconstructed_backtest": False,
+          }
+          (root / "research_verdict.json").write_text(
+              json.dumps(result, ensure_ascii=False, indent=2) + "\n",
+              encoding="utf-8",
+          )
+          print(json.dumps(result, ensure_ascii=False, indent=2))
+          if after is None:
+              raise RuntimeError("No corrected research calendar produced")
+          assert after["input_calendar_dates"] == 927
+          assert after["successful_candidate_dates"] == 927
+          assert after["failed_candidate_dates"] == 0
+          assert after["candidate_calendar_complete"] is True
+          assert after["strict_point_in_time_evidence"] is False
+          assert after["ready_for_reconstructed_backtest"] is False
+          assert ties == 0
+          PY
+
+      - name: Upload reviewed data and research diagnostics
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: research-top60-corrected-${{ github.run_id }}
+          path: |
+            reports/review/corrected/
+            reports/review/top60/
+            reports/review/working/sources.json
+            reports/review/research_verdict.json
+          retention-days: 90
+          if-no-files-found: warn
