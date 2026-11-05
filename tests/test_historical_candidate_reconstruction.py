@@ -5,8 +5,8 @@ from ashare_system.historical_candidate_reconstruction import (
     normalize_amounts,
     normalize_lifecycle,
     normalize_states,
-    reconstruct_candidate_day,
     reconstruct_calendar,
+    reconstruct_candidate_day,
 )
 
 
