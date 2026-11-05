@@ -8,6 +8,16 @@ The central rule is:
 
 A fact retrieved today from an official historical record is useful reconstructed evidence, but it is not identical to a file that was actually observed and locked on the historical date.
 
+## Verified archive progress (2026-11-05)
+
+- Full historical amount archival for 2023-01-03 through 2026-11-03 completed all 32 shards **and the merge job** in Actions run [41632436412](https://github.com/wangqiyue26-lab/A-share-analysis-system/actions/runs/41632436412). Merge manifest: 5,373 symbols, 27 failed symbols, 99.497% successful symbols, and 4,718,185 daily amount rows. The merged artifact is `historical-amount-2023-2026-41632436412`.
+- The four-shard BaoStock historical state pilot passed its explicit full-scale gate in Actions run [41634270390](https://github.com/wangqiyue26-lab/A-share-analysis-system/actions/runs/41634270390): 705/705 symbols and 621,796 state rows. Its success **does not** prove full-universe historical state completeness.
+- The 32-shard state expansion is defined in `.github/workflows/historical-state-full.yml`. It requires the original pilot assessment and fixed-end audited lifecycle artifact, checks each shard and the 32-way merge, and labels its results as reconstruction rather than strict observed PIT.
+- The 27 historical amount failures must remain visible. A 99.497% symbol-level success rate is *not* a proof that every daily Top60 ranking is unaffected. Historical candidate reconstruction must fail closed on any missing amount needed for eligibility/ranking.
+- Earlier same-day-only gating prevented delayed overnight daily actions from locking v2 and strict live evidence. PR #37 fixes the bounded overnight clock, but no missed historical date is retroactively labeled as contemporaneously observed.
+
+**Next promotion gate:** finish and validate the full historical state archive, reconcile ST effective dates with exchange/disclosure evidence, compare rebuilt Top60 against genuinely retained live candidate snapshots, and prove per-day amount availability. Until those checks pass, no reconstructed window can be promoted to a strict PIT result and `real_money_ready` remains false.
+
 ## Evidence grades
 
 Phase 4K-2 uses explicit evidence grades.
