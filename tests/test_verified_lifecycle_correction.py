@@ -29,7 +29,7 @@ def test_official_delisting_excludes_600190_on_actual_deletion_day():
     corrected, audit = apply_reviewed_delisting_correction(source)
     assert source.loc[0, "delist_date"] == "2025-07-28"
     assert corrected.loc[0, "delist_date"] == "2025-07-25"
-    assert corrected.loc[1, "delist_date"] is None
+    assert pd.isna(corrected.loc[1, "delist_date"])
     assert audit["official_source_url"] == OFFICIAL_SSE_NOTICE
     assert audit["strict_live_observed"] is False
     assert audit["changed_row_count"] == 1
